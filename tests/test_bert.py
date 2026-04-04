@@ -103,10 +103,15 @@ def _patch_training(monkeypatch):
             "from_pretrained": staticmethod(lambda *a, **k: _FakeTokenizerForTraining()),
         }),
     )
+    fake_config = type("Cfg", (), {"problem_type": None})()
+    fake_model = type("FM", (), {
+        "config": fake_config,
+        "float": lambda self: self,
+    })()
     monkeypatch.setattr(
         bert, "AutoModelForSequenceClassification",
         type("AM", (), {
-            "from_pretrained": staticmethod(lambda *a, **k: None),
+            "from_pretrained": staticmethod(lambda *a, **k: fake_model),
         }),
     )
     monkeypatch.setattr(bert, "_create_trainer", lambda **kw: FakeTrainer(**kw))
