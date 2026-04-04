@@ -160,6 +160,9 @@ def train_bert_classifier(
         config.model_name, num_labels=2, ignore_mismatched_sizes=True,
     )
     model.config.problem_type = "single_label_classification"
+    # Ensure weights are fp32 so the Trainer's fp16 GradScaler works correctly
+    # (some checkpoints, e.g. DeBERTa V2 Albertina, store weights in bf16).
+    model.float()
 
     train_dataset = _tokenize_dataframe(train_df, tokenizer, config.max_length)
     val_dataset = _tokenize_dataframe(validation_df, tokenizer, config.max_length)
