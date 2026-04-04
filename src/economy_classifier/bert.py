@@ -22,6 +22,7 @@ MODEL_REGISTRY = {
     "bertimbau": "neuralmind/bert-base-portuguese-cased",
     "finbert": "ProsusAI/finbert",
     "finbert_ptbr": "lucas-leme/FinBERT-PT-BR",
+    "albertina_brwac": "PORTULAN/albertina-900m-portuguese-ptbr-encoder-brwac",
 }
 
 LABELS = {0: "outros", 1: "mercado"}
