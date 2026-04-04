@@ -1,0 +1,28 @@
+# Dados e artefatos
+data/
+artifacts/runs/
+artifacts/splits/
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Ferramentas
+.pytest_cache/
+.ruff_cache/
+.coverage
+.ipynb_checkpoints/
+
+# Projeto legado
+.old/
+
+# Claude Code
+.claude/
+
+# Colab (gerados por scripts/)
+colab_splits.zip
+colab_bert_results.zip

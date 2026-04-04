@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "economy-classifier"
+version = "0.1.0"
+description = "Reproducible pipeline for economy-related text classification (mercado vs outros)."
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=1.13.0",
+    "datasets>=4.8.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.3",
+    "pandas>=3.0.1",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.15.0",
+    "seaborn>=0.13.2",
+    "torch>=2.10.0",
+    "transformers>=5.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ipykernel>=7.2.0",
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: end-to-end tests with synthetic data (deselect with '-m not integration')",
+    "slow: tests that take more than a few seconds (deselect with '-m not slow')",
+]
+
+[tool.ruff]
+extend-exclude = ["notebooks/legacy"]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*.ipynb" = ["E402"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
