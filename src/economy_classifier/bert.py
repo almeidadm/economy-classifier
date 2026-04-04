@@ -44,6 +44,7 @@ class BertTrainingConfig:
     seed: int = 42
     early_stopping_patience: int = 1
     save_total_limit: int = 2
+    gradient_checkpointing: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -59,6 +60,7 @@ class BertTrainingConfig:
             "seed": self.seed,
             "early_stopping_patience": self.early_stopping_patience,
             "save_total_limit": self.save_total_limit,
+            "gradient_checkpointing": self.gradient_checkpointing,
         }
 
 
@@ -182,6 +184,7 @@ def train_bert_classifier(
         metric_for_best_model="f1",
         seed=config.seed,
         fp16=torch.cuda.is_available(),
+        gradient_checkpointing=config.gradient_checkpointing,
         disable_tqdm=False,
         logging_steps=100,
         save_total_limit=config.save_total_limit,
