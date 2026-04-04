@@ -198,6 +198,15 @@ def train_bert_classifier(
     trainer.train()
     train_time = time.perf_counter() - t0
 
+    # Remove NotebookProgressCallback to avoid RuntimeError when calling
+    # evaluate() or predict() outside the training loop — after train() ends
+    # the callback's internal tracker is None, causing it to raise.
+    try:
+        from transformers.utils.notebook import NotebookProgressCallback
+        trainer.remove_callback(NotebookProgressCallback)
+    except Exception:
+        pass
+
     metrics = trainer.evaluate()
 
     trainer.save_model(str(model_dir))

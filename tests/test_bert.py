@@ -85,6 +85,9 @@ def _patch_training(monkeypatch):
         def save_model(self, path):
             Path(path).mkdir(parents=True, exist_ok=True)
 
+        def remove_callback(self, callback_cls):
+            pass
+
         def predict(self, dataset):
             n = len(dataset)
             preds = np.random.RandomState(42).randn(n, 2)
