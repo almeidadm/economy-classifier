@@ -156,7 +156,7 @@ def train_bert_classifier(
 
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
-        config.model_name, num_labels=2,
+        config.model_name, num_labels=2, ignore_mismatched_sizes=True,
     )
 
     train_dataset = _tokenize_dataframe(train_df, tokenizer, config.max_length)
