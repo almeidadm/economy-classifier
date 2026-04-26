@@ -99,11 +99,17 @@ def build_tfidf_search_space(
             f"strategy must be one of {sorted(VALID_STRATEGIES)}, got {strategy!r}"
         )
 
+    # max_features=None is intentionally excluded: with ngram_range=(1,3) and
+    # 120k docs (4/5 of the train+val pool) the unbounded vocabulary balloons
+    # past several million n-grams, and the per-worker count_vocab dict can hit
+    # 4+ GB — enough to OOM-kill workers even on a Colab L4 (53 GB) when running
+    # 5-fold CV with 2 jobs in parallel. Cap at 200k.
+    # min_df=1 is excluded for the same reason (no pruning of hapax n-grams).
     space: dict = {
         "tfidf__ngram_range": [(1, 1), (1, 2), (1, 3)],
-        "tfidf__min_df": [1, 2, 5, 10],
+        "tfidf__min_df": [2, 5, 10, 20],
         "tfidf__max_df": [0.85, 0.9, 0.95, 1.0],
-        "tfidf__max_features": [50_000, 100_000, 200_000, None],
+        "tfidf__max_features": [50_000, 100_000, 200_000],
         "tfidf__sublinear_tf": [True, False],
     }
 
@@ -183,7 +189,7 @@ def random_search_tfidf(
     cv_n_splits: int = 5,
     cv_seed: int = 43,
     scoring: str | None = None,
-    n_jobs: int = -1,
+    n_jobs: int = 2,
     seed: int = 42,
     search_space: dict | None = None,
     verbose: int = 1,
@@ -193,6 +199,12 @@ def random_search_tfidf(
     The inner CV uses ``cv_seed`` (default 43) so it produces *different* folds
     from ``artifacts/splits/cv_folds.json`` (seed=42) — the post-search
     ``cv_5fold`` regime then provides an independent variance estimate.
+
+    ``n_jobs`` defaults to 2 because Colab/free instances run out of memory
+    with ``-1`` once the pool exceeds ~100k samples (each worker pickles the
+    full text list + its own TF-IDF matrix). Bump to ``-1`` only on machines
+    with >32 GB RAM. ``pre_dispatch="n_jobs"`` caps in-flight jobs to avoid
+    a backlog amplifying memory pressure.
 
     Returns a :class:`SearchResult` whose ``best_params`` keep the sklearn
     pipeline-prefixed keys; use :func:`tfidf_best_params_to_kwargs` to strip
@@ -217,6 +229,7 @@ def random_search_tfidf(
         cv=cv,
         scoring=scoring,
         n_jobs=n_jobs,
+        pre_dispatch="n_jobs",  # cap in-flight jobs; default "2*n_jobs" can OOM
         random_state=seed,
         verbose=verbose,
         refit=False,

@@ -278,6 +278,18 @@ def _tiny_corpus(n_per_class: int = 30, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame({"text": texts, "label": labels})
 
 
+# Tiny override of the production search space so combinations that prune all
+# terms (min_df>=20 with 30 docs) don't appear in smoke tests.
+_TINY_SPACE = {
+    "tfidf__ngram_range": [(1, 1), (1, 2)],
+    "tfidf__min_df": [1, 2],
+    "tfidf__max_df": [0.95, 1.0],
+    "tfidf__max_features": [500, 1000],
+    "tfidf__sublinear_tf": [True, False],
+    "clf__C": [0.1, 1.0, 10.0],
+}
+
+
 def test_random_search_tfidf_runs_on_tiny_dataset():
     df = _tiny_corpus()
     result = random_search_tfidf(
@@ -288,6 +300,7 @@ def test_random_search_tfidf_runs_on_tiny_dataset():
         n_jobs=1,
         seed=42,
         verbose=0,
+        search_space=_TINY_SPACE,
     )
     assert isinstance(result, SearchResult)
     assert result.n_trials == 3
@@ -320,6 +333,7 @@ def test_random_search_tfidf_multiclass_uses_macro_f1():
         n_jobs=1,
         seed=42,
         verbose=0,
+        search_space=_TINY_SPACE,
     )
     assert result.scoring == "f1_macro"
 
