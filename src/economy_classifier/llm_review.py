@@ -56,31 +56,87 @@ Responda APENAS com um JSON no formato:
 {"label": "mercado" ou "outros", "justificativa": "<1 frase curta>"}"""
 
 
-def build_review_prompt(text: str) -> list[dict]:
-    """Build the messages array for the Sabiá 4 review API call (zero-shot).
+SYSTEM_PROMPT_MULTICLASS = """\
+Voce e um classificador multiclasse de textos jornalisticos brasileiros \
+da Folha de Sao Paulo.
 
-    Returns a list with a system message and the user query, compatible with
-    the OpenAI chat completions API.
-    """
+Sua tarefa: dado um trecho de texto, classifique-o em UMA das 8 categorias \
+editoriais abaixo, escolhendo a que melhor descreve o tema CENTRAL do texto.
+
+- "poder": politica partidaria, governo federal/estadual/municipal, congresso, \
+eleicoes, judiciario, sem foco economico dominante.
+- "colunas": opiniao assinada, colunas de opiniao, editoriais (qualquer tema, \
+formato opinativo).
+- "mercado": economia em sentido amplo — mercado financeiro (bolsa, cambio, \
+juros, bancos, commodities), atividade empresarial (resultados, fusoes, IPOs), \
+indicadores macroeconomicos (PIB, inflacao, Selic, desemprego), politica \
+economica e fiscal, agronegocio, comercio.
+- "esporte": futebol (todas as competicoes), olimpiadas, automobilismo, \
+qualquer modalidade esportiva.
+- "mundo": noticias internacionais sem foco economico dominante (geopolitica, \
+conflitos, eleicoes em outros paises).
+- "cotidiano": vida urbana, transito, clima, eventos locais, policia, \
+acidentes, infraestrutura, mobilidade.
+- "ilustrada": cultura, cinema, TV, musica, artes plasticas, literatura, \
+celebridades, entretenimento.
+- "outros": qualquer tema que NAO se encaixe nas 7 categorias acima (ex: \
+ciencia, saude publica, educacao, tecnologia, religiao, meio ambiente sem \
+recorte de cotidiano).
+
+Em caso de duvida, escolha a categoria que melhor representa o tema dominante \
+— nao mencoes incidentais.
+
+Responda APENAS com um JSON no formato:
+{"label": "<uma das 8 categorias>", "justificativa": "<1 frase curta>"}"""
+
+
+VALID_BINARY_LABELS: tuple[str, ...] = ("mercado", "outros")
+VALID_MULTI_LABELS: tuple[str, ...] = (
+    "poder", "colunas", "mercado", "esporte", "mundo",
+    "cotidiano", "ilustrada", "outros",
+)
+
+
+def build_review_prompt(text: str) -> list[dict]:
+    """Build the binary-classification messages array (zero-shot, mercado vs outros)."""
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": text},
     ]
 
 
-def parse_llm_response(raw: str) -> dict:
+def build_review_prompt_multiclass(text: str) -> list[dict]:
+    """Build the multiclass messages array (zero-shot, top-7 + outros)."""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_MULTICLASS},
+        {"role": "user", "content": text},
+    ]
+
+
+def parse_llm_response(raw: str, valid_labels: tuple[str, ...] = VALID_BINARY_LABELS) -> dict:
     """Extract label and justification from a raw LLM response string.
 
     Handles pure JSON, markdown-fenced JSON, and extra surrounding text.
+    Validates that ``label`` is in *valid_labels* — any other value yields
+    ``label="erro"``. Default validates against the binary labels for backward
+    compatibility; pass ``VALID_MULTI_LABELS`` for the multiclass task.
+
     Returns ``{"label": ..., "justificativa": ...}`` on success, or
     ``{"label": "erro", "justificativa": "<reason>"}`` on failure.
     """
     text = raw.strip()
 
+    def _check(parsed) -> bool:
+        return (
+            isinstance(parsed, dict)
+            and parsed.get("label") in valid_labels
+            and "justificativa" in parsed
+        )
+
     # Try direct JSON parse
     try:
         parsed = json.loads(text)
-        if _valid_response(parsed):
+        if _check(parsed):
             return parsed
     except json.JSONDecodeError:
         pass
@@ -90,7 +146,7 @@ def parse_llm_response(raw: str) -> dict:
     if fence_match:
         try:
             parsed = json.loads(fence_match.group(1))
-            if _valid_response(parsed):
+            if _check(parsed):
                 return parsed
         except json.JSONDecodeError:
             pass
@@ -100,7 +156,7 @@ def parse_llm_response(raw: str) -> dict:
     if brace_match:
         try:
             parsed = json.loads(brace_match.group())
-            if _valid_response(parsed):
+            if _check(parsed):
                 return parsed
         except json.JSONDecodeError:
             pass
@@ -108,10 +164,16 @@ def parse_llm_response(raw: str) -> dict:
     return {"label": "erro", "justificativa": f"Resposta nao parseavel: {text[:200]}"}
 
 
+def parse_llm_response_multiclass(raw: str) -> dict:
+    """Convenience wrapper: ``parse_llm_response(raw, valid_labels=VALID_MULTI_LABELS)``."""
+    return parse_llm_response(raw, valid_labels=VALID_MULTI_LABELS)
+
+
 def _valid_response(parsed: dict) -> bool:
+    """Backward-compat helper used by older API tests."""
     return (
         isinstance(parsed, dict)
-        and parsed.get("label") in ("mercado", "outros")
+        and parsed.get("label") in VALID_BINARY_LABELS
         and "justificativa" in parsed
     )
 
@@ -334,13 +396,25 @@ def classify_single_hf(
     max_new_tokens: int = 100,
     temperature: float = 0.0,
     max_input_length: int = 2048,
+    prompt_builder=None,
+    parser=None,
 ) -> dict:
     """Classify a single text via local HF causal LM (zero-shot).
+
+    ``prompt_builder`` defaults to :func:`build_review_prompt` (binary).
+    ``parser`` defaults to :func:`parse_llm_response` (binary labels).
+    For multiclass pass ``prompt_builder=build_review_prompt_multiclass``
+    and ``parser=parse_llm_response_multiclass``.
 
     Returns ``{"label": str, "justificativa": str, "raw_response": str}``.
     On parse failure returns ``label="erro"``.
     """
-    messages = build_review_prompt(text)
+    if prompt_builder is None:
+        prompt_builder = build_review_prompt
+    if parser is None:
+        parser = parse_llm_response
+
+    messages = prompt_builder(text)
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True,
     )
@@ -350,7 +424,7 @@ def classify_single_hf(
         temperature=temperature,
         max_input_length=max_input_length,
     )[0]
-    parsed = parse_llm_response(raw)
+    parsed = parser(raw)
     parsed["raw_response"] = raw
     return parsed
 
@@ -369,8 +443,13 @@ def classify_batch_hf(
     checkpoint_path: "Path | None" = None,
     checkpoint_every: int = 50,
     progress_callback=None,
+    prompt_builder=None,
+    parser=None,
 ) -> list[dict]:
     """Classify a list of texts in batches via local HF causal LM.
+
+    ``prompt_builder``/``parser`` default to the binary helpers; pass the
+    multiclass variants for the top-7+other task.
 
     Each result dict contains ``label``, ``justificativa``, ``raw_response``,
     ``record_id`` and ``method``. ``method`` is the registry key (e.g.
@@ -381,6 +460,11 @@ def classify_batch_hf(
         raise ValueError(
             f"texts and record_ids length mismatch: {len(texts)} vs {len(record_ids)}"
         )
+
+    if prompt_builder is None:
+        prompt_builder = build_review_prompt
+    if parser is None:
+        parser = parse_llm_response
 
     # Defensive: enforce left padding for decoder-only generation
     tokenizer.padding_side = "left"
@@ -394,7 +478,7 @@ def classify_batch_hf(
 
         prompts = [
             tokenizer.apply_chat_template(
-                build_review_prompt(t), tokenize=False, add_generation_prompt=True,
+                prompt_builder(t), tokenize=False, add_generation_prompt=True,
             )
             for t in batch_texts
         ]
@@ -412,7 +496,7 @@ def classify_batch_hf(
             raws = ["" for _ in batch_texts]
 
         for j, raw in enumerate(raws):
-            parsed = parse_llm_response(raw) if raw else {
+            parsed = parser(raw) if raw else {
                 "label": "erro", "justificativa": "Geracao falhou (batch error)",
             }
             parsed["raw_response"] = raw
@@ -449,7 +533,7 @@ def hf_results_to_predictions(
     *,
     label_to_id: dict[str, int] | None = None,
 ) -> pd.DataFrame:
-    """Convert raw HF classification results into the standard predictions CSV format.
+    """Convert raw binary HF classification results into the standard predictions CSV format.
 
     Output columns: ``index``, ``y_pred`` (0/1), ``y_score`` (0.0/1.0), ``method``,
     plus ``label`` and ``justificativa`` for traceability. Records with
@@ -473,6 +557,36 @@ def hf_results_to_predictions(
             "y_score": float(y),
             "method": r.get("method", "hf-llm"),
             "label": r["label"],
+            "justificativa": r.get("justificativa", ""),
+        })
+    return pd.DataFrame(rows)
+
+
+def hf_results_to_multiclass_predictions(
+    results: list[dict],
+    *,
+    valid_labels: tuple[str, ...] = VALID_MULTI_LABELS,
+) -> pd.DataFrame:
+    """Convert raw multiclass HF results into the standard multiclass predictions format.
+
+    Output columns: ``index``, ``y_pred`` (string label), ``method``, plus
+    ``label`` and ``justificativa`` for traceability. Records with
+    ``label="erro"`` (unparseable response) or any label outside *valid_labels*
+    are dropped. The output mirrors what ``train_tfidf_multiclass`` and
+    ``train_bert_multiclass`` produce — no ``y_score`` column (multiclass
+    models in this project don't expose calibrated per-class scores).
+    """
+    valid = set(valid_labels)
+    rows = []
+    for r in results:
+        label = r.get("label")
+        if label not in valid:
+            continue  # drop "erro" and anything outside the valid set
+        rows.append({
+            "index": r.get("record_id"),
+            "y_pred": label,
+            "method": r.get("method", "hf-llm"),
+            "label": label,
             "justificativa": r.get("justificativa", ""),
         })
     return pd.DataFrame(rows)

@@ -10,13 +10,18 @@ import pytest
 
 from economy_classifier.llm_review import (
     LLM_REGISTRY,
+    VALID_BINARY_LABELS,
+    VALID_MULTI_LABELS,
     build_review_prompt,
+    build_review_prompt_multiclass,
     classify_batch_hf,
     classify_single,
     classify_single_hf,
     compute_review_concordance,
+    hf_results_to_multiclass_predictions,
     hf_results_to_predictions,
     parse_llm_response,
+    parse_llm_response_multiclass,
 )
 
 
@@ -330,4 +335,106 @@ def test_hf_results_to_predictions_drops_errors_and_maps_labels():
 
 def test_hf_results_to_predictions_empty_input():
     preds = hf_results_to_predictions([])
+    assert len(preds) == 0
+
+
+# --- Multiclass: prompt, parser, predictions ---
+
+
+def test_valid_multi_labels_has_8_classes():
+    assert len(VALID_MULTI_LABELS) == 8
+    assert set(VALID_MULTI_LABELS) == {
+        "poder", "colunas", "mercado", "esporte",
+        "mundo", "cotidiano", "ilustrada", "outros",
+    }
+
+
+def test_valid_binary_labels_unchanged():
+    assert VALID_BINARY_LABELS == ("mercado", "outros")
+
+
+def test_build_review_prompt_multiclass_structure():
+    messages = build_review_prompt_multiclass("Lula assina decreto sobre Petrobras")
+    assert len(messages) == 2
+    assert messages[0]["role"] == "system"
+    assert "8 categorias" in messages[0]["content"]
+    assert messages[1]["content"] == "Lula assina decreto sobre Petrobras"
+
+
+def test_parse_llm_response_multiclass_accepts_top7_labels():
+    for label in VALID_MULTI_LABELS:
+        raw = f'{{"label": "{label}", "justificativa": "x"}}'
+        result = parse_llm_response_multiclass(raw)
+        assert result["label"] == label, f"failed for label {label}"
+
+
+def test_parse_llm_response_multiclass_rejects_binary_only_labels():
+    # "mercado" is valid in BOTH (overlap), but a label like "esportes" (with s)
+    # should be rejected because it's not in VALID_MULTI_LABELS exactly.
+    raw = '{"label": "esportes", "justificativa": "Futebol."}'
+    result = parse_llm_response_multiclass(raw)
+    assert result["label"] == "erro"
+
+
+def test_parse_llm_response_multiclass_rejects_arbitrary_labels():
+    raw = '{"label": "tecnologia", "justificativa": "IA."}'
+    result = parse_llm_response_multiclass(raw)
+    assert result["label"] == "erro"
+
+
+def test_parse_llm_response_with_explicit_valid_labels():
+    """The base parse_llm_response respects a custom valid_labels argument."""
+    raw = '{"label": "esporte", "justificativa": "x"}'
+    binary = parse_llm_response(raw)  # default: binary labels
+    multi = parse_llm_response(raw, valid_labels=VALID_MULTI_LABELS)
+    assert binary["label"] == "erro"
+    assert multi["label"] == "esporte"
+
+
+def test_classify_single_hf_with_multiclass_parser():
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "esporte", "justificativa": "Futebol Cup."}',
+    ])
+    result = classify_single_hf(
+        tokenizer, model, "Brasil bate Argentina por 3x1",
+        prompt_builder=build_review_prompt_multiclass,
+        parser=parse_llm_response_multiclass,
+    )
+    assert result["label"] == "esporte"
+
+
+def test_classify_batch_hf_with_multiclass_routes_through_custom_parser():
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "poder", "justificativa": "X"}',
+        '{"label": "ilustrada", "justificativa": "Y"}',
+    ])
+    results = classify_batch_hf(
+        tokenizer, model,
+        texts=["Eleicao", "Filme"],
+        record_ids=[1, 2],
+        method="qwen2.5-7b-instruct",
+        batch_size=2,
+        prompt_builder=build_review_prompt_multiclass,
+        parser=parse_llm_response_multiclass,
+    )
+    assert len(results) == 2
+    assert results[0]["label"] == "poder"
+    assert results[1]["label"] == "ilustrada"
+
+
+def test_hf_results_to_multiclass_predictions_drops_invalid():
+    results = [
+        {"label": "mercado", "justificativa": "A", "record_id": 1, "method": "qwen"},
+        {"label": "esporte", "justificativa": "B", "record_id": 2, "method": "qwen"},
+        {"label": "erro", "justificativa": "C", "record_id": 3, "method": "qwen"},
+        {"label": "tecnologia", "justificativa": "D", "record_id": 4, "method": "qwen"},
+    ]
+    preds = hf_results_to_multiclass_predictions(results)
+    assert len(preds) == 2
+    assert list(preds["y_pred"]) == ["mercado", "esporte"]
+    assert "y_score" not in preds.columns  # multiclass has no probabilistic score
+
+
+def test_hf_results_to_multiclass_predictions_empty():
+    preds = hf_results_to_multiclass_predictions([])
     assert len(preds) == 0
