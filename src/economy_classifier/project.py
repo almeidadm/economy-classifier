@@ -118,3 +118,68 @@ def persist_run_artifacts(
         (run_dir / "metrics.json").write_text(
             json.dumps(metrics, indent=2, ensure_ascii=False)
         )
+
+
+# ---------------------------------------------------------------------------
+# Result card (Fase 2) — schema unico para comparacao entre modelos
+# ---------------------------------------------------------------------------
+
+VALID_TASKS = {"binary", "multiclass"}
+VALID_REGIMES = {"fixed_split", "cv_5fold", "test_set"}
+
+
+def compute_artifact_size_mb(path: Path) -> float:
+    """File size in MB if *path* is a file, sum of files if directory."""
+    if path.is_file():
+        return path.stat().st_size / 1e6
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file()) / 1e6
+
+
+def build_result_card(
+    *,
+    model_id: str,
+    task: str,
+    regime: str,
+    metrics: dict,
+    cost: dict,
+    config: dict,
+    n_train_samples: int | None = None,
+    n_eval_samples: int | None = None,
+    predictions_path: str | None = None,
+    notes: str | None = None,
+    hyperparameter_search: dict | None = None,
+) -> dict:
+    """Standardized result card for cross-model comparison.
+
+    All notebooks emit this JSON so notebook 12 can aggregate without per-model logic.
+    The optional ``hyperparameter_search`` field carries the
+    :meth:`SearchResult.card_payload` from a preceding RandomizedSearchCV run.
+    """
+    if task not in VALID_TASKS:
+        raise ValueError(f"task must be one of {VALID_TASKS}, got {task!r}")
+    if regime not in VALID_REGIMES:
+        raise ValueError(f"regime must be one of {VALID_REGIMES}, got {regime!r}")
+
+    return {
+        "model_id": model_id,
+        "task": task,
+        "regime": regime,
+        "metrics": metrics,
+        "cost": cost,
+        "config": config,
+        "n_train_samples": n_train_samples,
+        "n_eval_samples": n_eval_samples,
+        "predictions_path": predictions_path,
+        "notes": notes,
+        "hyperparameter_search": hyperparameter_search,
+        "git_commit": get_git_commit_short(),
+        "generated_at": utc_now_iso(),
+    }
+
+
+def persist_result_card(card: dict, run_dir: Path) -> Path:
+    """Write *card* as ``result_card.json`` inside *run_dir* and return its path."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out = run_dir / "result_card.json"
+    out.write_text(json.dumps(card, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out

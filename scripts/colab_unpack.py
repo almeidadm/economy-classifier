@@ -9,8 +9,8 @@ created by the Colab notebook:
 
     artifacts/runs/
         {timestamp}-bert-bertimbau/
-        {timestamp}-bert-finbert/
         {timestamp}-bert-finbert-ptbr/
+        {timestamp}-bert-deb3rta-base/
 
 Each directory contains: predictions_val.csv, predictions_test.csv,
 metrics.json, run_metadata.json, and optionally model/.

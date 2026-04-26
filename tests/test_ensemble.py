@@ -1,11 +1,17 @@
 """Tests for economy_classifier.ensemble — voting, stacking, agreement."""
 
+import json
+
 import numpy as np
 import pandas as pd
 from economy_classifier.ensemble import (
     compute_agreement_matrix,
     compute_contingency_table,
+    compute_fleiss_kappa,
+    discover_runs,
+    load_run_predictions,
     majority_vote,
+    optimize_voting_threshold,
     predict_stacking,
     train_stacking_classifier,
     weighted_vote,
@@ -149,3 +155,105 @@ def test_contingency_table_levels():
     assert isinstance(table, pd.DataFrame)
     # Should have rows for agreement levels present in the data
     assert len(table) > 0
+
+
+# ---------------------------------------------------------------------------
+# Fleiss' Kappa tests
+# ---------------------------------------------------------------------------
+
+def test_fleiss_kappa_perfect_agreement():
+    preds = {f"m{i}": pd.Series([1, 0, 1, 0, 1]) for i in range(5)}
+    kappa = compute_fleiss_kappa(preds)
+    assert abs(kappa - 1.0) < 1e-10
+
+
+def test_fleiss_kappa_returns_float():
+    preds = {"a": pd.Series([1, 0, 1]), "b": pd.Series([0, 1, 0]), "c": pd.Series([1, 0, 1])}
+    kappa = compute_fleiss_kappa(preds)
+    assert isinstance(kappa, float)
+
+
+def test_fleiss_kappa_range():
+    rng = np.random.RandomState(42)
+    preds = {f"m{i}": pd.Series(rng.randint(0, 2, 50)) for i in range(5)}
+    kappa = compute_fleiss_kappa(preds)
+    assert -1.0 <= kappa <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Threshold optimization tests
+# ---------------------------------------------------------------------------
+
+def test_optimize_voting_threshold_returns_valid():
+    rng = np.random.RandomState(42)
+    scores = {f"m{i}": pd.Series(rng.uniform(0, 1, 50)) for i in range(3)}
+    weights = {f"m{i}": 0.8 for i in range(3)}
+    y_true = pd.Series([1] * 15 + [0] * 35)
+    result = optimize_voting_threshold(scores, y_true, weights)
+    assert 0.3 <= result["best_threshold"] <= 0.7
+    assert 0 <= result["best_f1"] <= 1.0
+    assert len(result["all_results"]) > 0
+
+
+def test_optimize_voting_threshold_best_matches():
+    rng = np.random.RandomState(42)
+    scores = {f"m{i}": pd.Series(rng.uniform(0, 1, 100)) for i in range(3)}
+    weights = {f"m{i}": 1.0 for i in range(3)}
+    y_true = pd.Series([1] * 30 + [0] * 70)
+    result = optimize_voting_threshold(scores, y_true, weights)
+    # Best F1 should be the max of all results
+    max_f1 = max(r["f1"] for r in result["all_results"])
+    assert result["best_f1"] == max_f1
+
+
+# ---------------------------------------------------------------------------
+# load_run_predictions tests
+# ---------------------------------------------------------------------------
+
+def test_load_run_predictions_split_file(tmp_path):
+    df = pd.DataFrame({"index": [0, 1], "y_true": [0, 1], "y_pred": [0, 1], "y_score": [0.1, 0.9], "method": "test"})
+    df.to_csv(tmp_path / "predictions_test.csv", index=False)
+    loaded = load_run_predictions(tmp_path, split="test")
+    assert loaded is not None
+    assert len(loaded) == 2
+
+
+def test_load_run_predictions_generic_file(tmp_path):
+    df = pd.DataFrame({"index": [0], "y_true": [1], "y_pred": [1], "y_score": [0.8], "method": "test"})
+    df.to_csv(tmp_path / "predictions.csv", index=False)
+    loaded = load_run_predictions(tmp_path, split="val")
+    assert loaded is not None
+    assert len(loaded) == 1
+
+
+def test_load_run_predictions_missing(tmp_path):
+    loaded = load_run_predictions(tmp_path, split="test")
+    assert loaded is None
+
+
+# ---------------------------------------------------------------------------
+# discover_runs tests
+# ---------------------------------------------------------------------------
+
+def test_discover_runs(tmp_path):
+    # Create a fake TF-IDF run
+    run1 = tmp_path / "run-tfidf"
+    run1.mkdir()
+    (run1 / "run_metadata.json").write_text(json.dumps({
+        "run_id": "run-tfidf", "stage": "tfidf-training",
+        "summary": {"method": "logreg", "f1": 0.76},
+    }))
+
+    # Create a fake BERT run
+    run2 = tmp_path / "run-bert"
+    run2.mkdir()
+    (run2 / "run_metadata.json").write_text(json.dumps({
+        "run_id": "run-bert", "stage": "bert-training",
+        "summary": {"variant": "bertimbau", "val_metrics": {"f1": 0.81}},
+    }))
+
+    discovered = discover_runs(tmp_path)
+    assert "logreg" in discovered
+    assert "bertimbau" in discovered
+    assert discovered["logreg"]["stage"] == "tfidf-training"
+    assert discovered["bertimbau"]["stage"] == "bert-training"

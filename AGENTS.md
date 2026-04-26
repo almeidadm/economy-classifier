@@ -37,7 +37,6 @@ Voce e uma professora titular com doutorado em Ciencia da Informacao e pos-douto
 ### Limitacoes
 - [ ] O label `mercado` e uma categoria editorial, nao uma anotacao linguistica — essa limitacao de validade de construto esta explicita.
 - [ ] O corpus e de dominio unico (Folha de Sao Paulo) — generalizacao nao e avaliada.
-- [ ] A heuristica nao e treinada — a comparacao direta de F1 com modelos supervisionados e assimetrica e isso esta documentado.
 
 **Tom:** "Esse resultado e do split de teste ou de validacao? Se for de validacao, nao pode aparecer na tabela final da dissertacao."
 
@@ -58,7 +57,6 @@ src/economy_classifier/
     datasets.py     — Carga, binarizacao, splits 3-way, balanceamento
     tfidf.py        — Pipeline TF-IDF (LogReg, LinearSVC, MultinomialNB)
     bert.py         — Treino e inferencia BERT (BERTimbau)
-    heuristics.py   — Scoring heuristico (195 termos, 7 temas)
     evaluation.py   — Metricas padronizadas, McNemar, AUC-ROC
     ensemble.py     — Votacao, stacking, concordancia
     project.py      — Runs, artefatos, metadados
@@ -87,7 +85,6 @@ src/economy_classifier/
    - Splits: verificar disjuncao, proporcoes, estratificacao
    - Metricas: valores conhecidos com fixtures pequenas
    - Ensemble: votacao com cenarios de empate, stacking com dados sinteticos
-   - Heuristica: termos conhecidos com scores esperados
 
 ### Cronograma de implementacao (8 etapas)
 
@@ -96,7 +93,7 @@ src/economy_classifier/
 | 1 | `datasets.py` | `build_train_val_test_split()` com 3 particoes estratificadas |
 | 2 | `tfidf.py` | Adicionar `MultinomialNB` e `LinearSVC` ao `CLASSIFIER_CHOICES` |
 | 3 | Notebooks 01, 06 | Treinar BERT + 3 variantes TF-IDF nos novos splits |
-| 4 | `evaluation.py` | Avaliar todos os 5 metodos (+ heuristica 2 modos) no split de validacao |
+| 4 | `evaluation.py` | Avaliar todos os metodos no split de validacao |
 | 5 | `ensemble.py` | Votacao majoritaria, ponderada, stacking, concordancia |
 | 6 | Notebook 07 | Avaliacao comparativa: tabela final, ensembles, McNemar |
 | 7 | Notebook 07 | Avaliacao final no split de teste (execucao unica) |
@@ -148,7 +145,6 @@ Para decisoes que sao simultaneamente metodologicas e tecnicas (ex: como impleme
 |-------------|---------|--------|
 | Usar metricas do val na tabela final | @Revisora | "Esses numeros nao sao do teste — nao podem ir pra dissertacao" |
 | Logica de treino dentro do notebook | @Arquiteto | "Isso deveria estar em src/ com teste unitario" |
-| Avaliar heuristica no treino | @Revisora | "A heuristica nao treina, mas tem que ser avaliada no mesmo teste que os outros" |
 | Copiar/colar codigo entre notebooks | @Arquiteto | "Extraia para uma funcao em src/ e importe" |
 | Reportar accuracy como metrica principal | @Revisora | "Com 87.5% de negativos, accuracy e enganosa — use F1" |
 | Balancear val ou teste | @Revisora | "Balanceamento so no treino. Val e teste refletem a distribuicao real" |

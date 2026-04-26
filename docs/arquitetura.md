@@ -14,12 +14,12 @@ O codigo-fonte esta organizado em 8 modulos dentro de `src/economy_classifier/`:
 
 | Modulo | Responsabilidade |
 |--------|-----------------|
-| `project.py` | Gerenciamento de runs: criacao de diretorios, metadados, persistencia de artefatos |
-| `datasets.py` | Split estratificado 3-way (64/16/20) e balanceamento por downsample |
-| `evaluation.py` | Metricas binarias (precision, recall, F1, accuracy), teste de McNemar, AUC-ROC |
-| `heuristics.py` | Lexico ponderado com 195 termos, 7 temas, penalidades contextuais |
-| `tfidf.py` | 3 classificadores lineares: LogisticRegression, CalibratedClassifierCV(LinearSVC), MultinomialNB |
-| `bert.py` | Fine-tuning de 3 checkpoints BERT: BERTimbau, FinBERT, FinBERT-PT-BR |
+| `project.py` | Gerenciamento de runs: criacao de diretorios, metadados, `result_card` (com `hyperparameter_search`) |
+| `datasets.py` | Split estratificado 80/10/10 e `StratifiedKFold(5)` sobre o pool train+val (90%) |
+| `evaluation.py` | Metricas binarias e multiclasse, teste de McNemar, AUC-ROC, matriz de confusao, `summarize_cv_metrics`, `compute_cost_metrics` |
+| `tfidf.py` | 3 classificadores lineares (LogReg, CalibratedClassifierCV(LinearSVC), MultinomialNB) + variantes multiclasse (native + OvR) |
+| `bert.py` | Fine-tuning de checkpoints transformer: BERTimbau, FinBERT-PT-BR, DeB3RTa-base |
+| `hyperparameter_search.py` | `RandomizedSearchCV` para TF-IDF (sklearn) e busca aleatoria custom para BERT (loop com HF Trainer) |
 | `ensemble.py` | 4 estrategias de ensemble: votacao majoritaria, votacao ponderada, stacking, concordancia |
 | `visualization.py` | Geracao de figuras em PNG (300 DPI) e PDF vetorial |
 
@@ -27,7 +27,7 @@ O codigo-fonte esta organizado em 8 modulos dentro de `src/economy_classifier/`:
 
 ## Inventario de metodos
 
-### Metodos individuais (M1-M5)
+### Metodos individuais (M1-M4c)
 
 | ID | Metodo | Familia | Requer treino |
 |----|--------|---------|---------------|
@@ -35,11 +35,10 @@ O codigo-fonte esta organizado em 8 modulos dentro de `src/economy_classifier/`:
 | M2 | TF-IDF + LinearSVC (calibrado) | Linear, margem maxima | Sim |
 | M3 | TF-IDF + Multinomial Naive Bayes | Probabilistico, generativo | Sim |
 | M4a | BERT fine-tuned (BERTimbau) | Neural, Transformer | Sim |
-| M4b | BERT fine-tuned (FinBERT) | Neural, Transformer | Sim |
-| M4c | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer | Sim |
-| M5 | Heuristica lexical ponderada | Baseado em regras | Nao |
+| M4b | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer | Sim |
+| M4c | DeBERTa fine-tuned (DeB3RTa-base) | Neural, Transformer | Sim |
 
-Os seis primeiros metodos sao supervisionados e compartilham o mesmo split de treino balanceado. O M5 e baseado em regras e nao requer treino.
+Todos os metodos sao supervisionados, compartilham os mesmos splits e folds, e passam pela mesma busca de hiperparametros (RandomizedSearchCV) antes da avaliacao.
 
 ### Estrategias de ensemble (E1-E4)
 
@@ -54,42 +53,57 @@ As estrategias de ensemble sao calibradas exclusivamente no split de validacao. 
 
 ---
 
+## Busca de hiperparametros
+
+Cada modelo passa por uma busca aleatoria sobre o pool train+val (90%) **antes** dos 3 regimes de avaliacao. Os melhores hiperparametros encontrados sao reusados nos 3 regimes (binario e multiclasse independentes).
+
+| Familia | Mecanismo | Inner | Default n_iter | Espaco |
+|---------|-----------|-------|----------------|--------|
+| TF-IDF | `RandomizedSearchCV` (sklearn) | `StratifiedKFold(5, seed=43)` | 60 | `ngram_range`, `min_df`, `max_df`, `max_features`, `sublinear_tf`, `C`/`alpha`, `class_weight`/`fit_prior` |
+| BERT | Loop custom (HF Trainer) | val unico | 25 | `learning_rate`, `per_device_train_batch_size`, `num_train_epochs`, `weight_decay`, `warmup_ratio`, `gradient_accumulation_steps` |
+
+A assimetria — TF-IDF inner-CV vs BERT val unico — e deliberada: o custo de inner-CV em BERT seria proibitivo mesmo em A100. Esta declarada no campo `hyperparameter_search.scoring` de cada `result_card.json` e deve constar na sessao de discussao do artigo.
+
+O log completo da busca (todos os trials, scores, duracoes) fica em `artifacts/runs/{model_id}_search_{task}/search_result.json`. O `result_card.json` carrega so o payload compacto (`best_params`, `best_score`, `n_trials`, `search_seconds`, `scoring`, `search_space`).
+
+O inner-CV TF-IDF usa `cv_seed=43` deliberadamente diferente do `cv_folds.json` (`seed=42`) para que o regime `cv_5fold` reportado seja uma estimativa de variancia em particoes **independentes** das usadas na selecao.
+
+---
+
 ## Fluxo de dados
 
 ```
 Corpus Folha de Sao Paulo (167.053 artigos)
     |
     v
-build_train_val_test_split()           # datasets.py
+build_train_val_test_split()           # datasets.py  (80/10/10, seed=42)
     |
-    +---> Teste (20%)  ~33.411 linhas  (INTOCAVEL ate avaliacao final)
+    +---> Teste (10%)        ~16.629 linhas  (INTOCAVEL ate test_set)
     |
-    +---> Validacao (16%)  ~26.728 linhas
-    |
-    +---> Treino bruto (64%)  ~106.914 linhas
+    +---> Pool train+val (90%)  ~150.288 linhas
+              |
+              +-- build_cv_folds(n=5, seed=42)        # cv_folds.json
               |
               v
-         build_balanced_training_frame()    # datasets.py
+        random_search_tfidf() / random_search_bert()  # hyperparameter_search.py
+              |   (busca em train+val; TF-IDF: inner-CV seed=43; BERT: val unico)
+              v
+        best_params (binario + multiclasse, por modelo)
               |
               v
-         Treino balanceado  ~33.552 linhas (50/50)
+    +--- 3 regimes por modelo (com best_params)
+              fixed_split  : train -> val
+              cv_5fold     : 5 folds em cv_folds.json (variancia)
+              test_set     : train+val -> test FIXO
               |
               v
-    +--- train_tfidf_classifier()          # tfidf.py  (M1, M2, M3)
-    +--- train_bert_classifier()           # bert.py   (M4a, M4b, M4c)
-    +--- score_text() + classify_score()   # heuristics.py (M5)
+        result_card.json (metricas + custo + hyperparameter_search)
               |
               v
-         Predicoes no split de validacao
-              |
-              v
-    +--- majority_vote()                   # ensemble.py (E1)
+    +--- majority_vote()                   # ensemble.py (E1, no test_set)
     +--- weighted_vote()                   # ensemble.py (E2)
-    +--- train_stacking_classifier()       # ensemble.py (E3)
+    +--- train_stacking_classifier()       # ensemble.py (E3, treinado em val)
     +--- compute_contingency_table()       # ensemble.py (E4)
-              |
-              v
-         Avaliacao final no split de teste
               |
               v
          compute_binary_metrics()          # evaluation.py
@@ -100,10 +114,12 @@ build_train_val_test_split()           # datasets.py
 ### Principios do fluxo
 
 1. **Estratificacao preservada**: cada split mantem ~12.5% de `mercado` (tolerancia +/-0.5pp).
-2. **Balanceamento isolado**: apenas o split de treino e balanceado. Validacao e teste nunca sao balanceados.
-3. **Split de teste intocavel**: o split de teste so e utilizado na avaliacao final comparativa.
-4. **Sem vazamento**: o meta-classificador do stacking e treinado em predicoes do split de validacao, nunca do treino.
-5. **Determinismo**: seed=42 em todos os pontos de aleatoriedade garante reprodutibilidade.
+2. **Sem balanceamento no fluxo padrao**: val e teste preservam a distribuicao real. `build_balanced_training_frame` permanece para reproduzir resultados legados.
+3. **Split de teste intocavel**: o split de teste so aparece no regime `test_set`.
+4. **Busca antes da avaliacao**: cada modelo passa por `RandomizedSearchCV` em train+val antes dos 3 regimes. Os mesmos `best_params` sao usados nos 3.
+5. **Sem vazamento**: o stacking e treinado em predicoes do split de val (nunca do treino). O test set nunca aparece na busca.
+6. **Independencia de folds**: a busca TF-IDF usa inner `cv_seed=43`, o `cv_folds.json` usa `seed=42` — o regime `cv_5fold` reportado e sobre folds independentes dos usados na selecao.
+7. **Determinismo**: seed=42 em todos os pontos de aleatoriedade garante reprodutibilidade.
 
 ---
 
@@ -154,7 +170,7 @@ Todos os metodos produzem predicoes no mesmo formato CSV:
 | `y_true` | int (0/1) | Label real |
 | `y_pred` | int (0/1) | Predicao binaria |
 | `y_score` | float [0,1] | Score continuo (probabilidade ou score normalizado) |
-| `method` | str | Identificador do metodo (ex: `logreg`, `linearsvc`, `nb`, `bertimbau`, `finbert`, `finbert_ptbr`, `heuristic_strict`) |
+| `method` | str | Identificador do metodo (ex: `logreg`, `linearsvc`, `nb`, `bertimbau`, `finbert_ptbr`, `deb3rta_base`) |
 
 ---
 
@@ -169,7 +185,6 @@ splits --> treino M3 --> predicoes M3 --+-- ensemble --> avaliacao final
 splits --> treino M4a --> predicoes M4a -+
 splits --> treino M4b --> predicoes M4b -+
 splits --> treino M4c --> predicoes M4c -+
-           heuristica --> predicoes M5 --+
 ```
 
 ---
@@ -185,7 +200,7 @@ Figuras obrigatorias por metodo individual:
 
 | Figura | Descricao | Metodos |
 |--------|-----------|---------|
-| Matriz de confusao | Heatmap com contagens | Todos (M1-M5) |
+| Matriz de confusao | Heatmap com contagens | Todos (M1-M4c) |
 | Curva precision-recall | Precision vs recall | M1, M3, M4a, M4b, M4c |
 | Curva ROC | TPR vs FPR com AUC | M1, M3, M4a, M4b, M4c |
 | Top termos | Barplot dos 20 termos mais discriminativos | M1 |

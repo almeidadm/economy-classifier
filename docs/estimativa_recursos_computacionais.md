@@ -1,6 +1,6 @@
 # Estimativa de Consumo de Recursos Computacionais
 
-Documento de analise e estimativa de recursos necessarios para execucao completa do pipeline de classificacao binaria (`mercado` vs `outros`). As estimativas consideram os parametros tecnicos definidos em `REQUIREMENTS.md`, a implementacao dos modulos em `src/economy_classifier/`, e as caracteristicas do hardware disponivel.
+Documento de analise e estimativa de recursos necessarios para execucao completa do pipeline. As estimativas originais (secoes 1-7) cobriam o fluxo "treino unico" do esquema 64/16/20 e seguem validas para um treino isolado. **O protocolo atual inclui (a) splits 80/10/10 + CV 5-fold e (b) `RandomizedSearchCV` por modelo antes dos 3 regimes de avaliacao**, o que multiplica a carga total. Ver a secao final **Adendo: orcamento da nova metodologia (search-then-evaluate)**.
 
 ---
 
@@ -234,12 +234,12 @@ Estimativa total por modelo:
 
 Estimativa total para os 3 modelos BERT:
 
-| Cenario | M4a (BERTimbau) | M4b (FinBERT) | M4c (FinBERT-PT-BR) | **Total** |
-|---------|----------------|---------------|---------------------|-----------|
-| 3 epocas | ~4,2 h | ~4,2 h | ~4,2 h | **~12,6 h** |
-| 2 epocas (early stop) | ~2,8 h | ~2,8 h | ~2,8 h | **~8,5 h** |
+| Cenario | M4a (BERTimbau) | M4b (FinBERT-PT-BR) | M4c (DeB3RTa) | **Total** |
+|---------|----------------|---------------------|---------------|-----------|
+| 3 epocas | ~4,2 h | ~4,2 h | ~3,0 h | **~11,4 h** |
+| 2 epocas (early stop) | ~2,8 h | ~2,8 h | ~2,0 h | **~7,6 h** |
 
-**Nota:** Os treinos devem ser executados sequencialmente (VRAM insuficiente para paralelizar). O FinBERT (M4b) pode ser marginalmente mais lento por carregar um tokenizador em ingles e re-processar tokens em portugues.
+**Nota:** Os treinos devem ser executados sequencialmente (VRAM insuficiente para paralelizar). DeB3RTa-base (~71M params) e mais leve que BERTimbau/FinBERT-PT-BR (~110M cada), portanto roda mais rapido.
 
 #### 3.2.5 Consumo de RAM durante treino BERT
 
@@ -267,43 +267,7 @@ Os checkpoints intermediarios podem ser removidos apos o treino. Se disco for re
 
 ---
 
-### 3.3 Metodo heuristico (M5)
-
-#### 3.3.1 Parametros
-
-| Parametro | Valor |
-|-----------|-------|
-| Catalogo | 195 termos em 7 temas |
-| Niveis de sinal | nuclear(4), setorial(3), contextual(2), fraco(1) |
-| Penalidades | 3 regras locais + 3 regras globais |
-| Normalizacao | `log1p(word_count)` |
-
-#### 3.3.2 Perfil computacional
-
-A heuristica nao requer treino. Para cada texto, o modulo `score_text()` executa:
-
-1. Normalizacao de texto (regex + unicode)
-2. Compilacao e busca de 195 padroes regex
-3. Avaliacao de regras de contexto negativo (3 regras, cada uma com 5-6 contextos)
-4. Avaliacao de penalidades globais (3 verificacoes com 10-30 contextos cada)
-
-| Operacao | Volume | Tempo estimado |
-|----------|--------|---------------|
-| Avaliacao no val (26.728 textos) | 26.728 x 195 regex = ~5,2M buscas | ~4-8 min |
-| Avaliacao no teste (33.411 textos) | 33.411 x 195 regex = ~6,5M buscas | ~5-10 min |
-
-| Recurso | Estimativa |
-|---------|-----------|
-| CPU | Single-thread (sem paralelizacao nativa) |
-| RAM | ~800 MB (DataFrame + catalogo + resultados) |
-| GPU | Nao utilizada |
-| Disco | Negligivel (~2-5 MB para predicoes CSV) |
-
-**Nota de otimizacao:** A implementacao atual em `heuristics.py` recompila os padroes regex (`re.compile`) a cada chamada de `score_text`. Pre-compilar os padroes uma unica vez reduziria o tempo em ~30-40%. Essa otimizacao nao e necessaria para viabilidade, mas e recomendavel.
-
----
-
-### 3.4 Estrategias de ensemble (E1-E4)
+### 3.3 Estrategias de ensemble (E1-E4)
 
 As operacoes de ensemble sao computacionalmente triviais, operando sobre as predicoes ja geradas.
 
@@ -331,10 +295,9 @@ Execucao sequencial, do notebook 01 ao 07:
 | 03 | TF-IDF + LinearSVC (treino + eval no val) | ~4-6 min |
 | 04 | TF-IDF + MultinomialNB (treino + eval no val) | ~1-2 min |
 | 05 | BERT BERTimbau (treino + eval no val) | ~3-4 h |
-| 05b | BERT FinBERT (treino + eval no val) | ~3-4 h |
-| 05c | BERT FinBERT-PT-BR (treino + eval no val) | ~3-4 h |
-| 06 | Heuristica (eval no val, 2 modos) | ~5-10 min |
-| 07 | Inferencia no teste (7 metodos) | ~30-45 min |
+| 05b | BERT FinBERT-PT-BR (treino + eval no val) | ~3-4 h |
+| 05c | DeBERTa DeB3RTa-base (treino + eval no val) | ~2-3 h |
+| 07 | Inferencia no teste (6 metodos) | ~30-45 min |
 | 07 | Ensembles + McNemar + figuras | ~5-10 min |
 | **Total** | | **~10-14 horas** |
 
@@ -426,7 +389,7 @@ BertTrainingConfig(
 
 ### 6.2 Ordem de execucao sugerida
 
-1. Executar notebooks 01-04 + 06 primeiro (TF-IDF + heuristica) — ~15 min total. Isso valida todo o pipeline sem depender da GPU.
+1. Executar notebooks 01-04 primeiro (TF-IDF) — ~15 min total. Isso valida todo o pipeline sem depender da GPU.
 2. Executar notebooks 05, 05b, 05c um por vez, verificando estabilidade.
 3. Executar notebook 07 por ultimo.
 
@@ -449,7 +412,7 @@ watch -n 10 free -h
 | **Tempo total estimado** | **10-14 horas** |
 | Tempo TF-IDF (3 modelos) | ~10-15 minutos |
 | Tempo BERT (3 modelos) | ~9-12 horas |
-| Tempo heuristica + ensembles | ~15-20 minutos |
+| Tempo ensembles | ~5-10 minutos |
 | **Pico de RAM** | **~3,5-4,0 GB** (de 16 GB) |
 | **Pico de VRAM** | **~2,5-2,7 GB** (de 3,9 GB) |
 | **Disco total (permanente)** | **~2,0-2,5 GB** |
@@ -457,3 +420,54 @@ watch -n 10 free -h
 | Viabilidade no hardware atual | **Sim, com margem apertada na VRAM** |
 
 O pipeline e viavel no hardware disponivel. O principal risco e a VRAM limitada (4 GB) durante treino BERT, que opera com margem de ~1,2 GB. As mitigacoes descritas (gradient checkpointing, aumento de eval batch size) sao suficientes para garantir execucao estavel. O tempo total de ~10-14 horas e dominado pelo treino dos 3 modelos BERT e pode ser distribuido em sessoes separadas sem perda de progresso.
+
+---
+
+## Adendo: orcamento da nova metodologia (search-then-evaluate)
+
+A reformulacao introduz duas mudancas que multiplicam a carga total:
+
+1. **Splits 80/10/10 + CV 5-fold** — cada modelo agora roda 3 regimes (`fixed_split`, `cv_5fold`, `test_set`) por tarefa (binario + multiclasse). O `cv_5fold` sozinho ja sao 5 fits.
+2. **`RandomizedSearchCV` antes da avaliacao** — TF-IDF 60 trials x 5 inner folds = 300 fits adicionais por modelo por tarefa; BERT 25 trials (val unico) por modelo por tarefa.
+
+### Carga TF-IDF total (por modelo, por tarefa)
+
+| Etapa | Fits | Tempo (i7-11370H) |
+|-------|------|-------------------|
+| Search (60 trials x 5 folds) | 300 | ~30-60 min |
+| `fixed_split` | 1 | ~10-30 s |
+| `cv_5fold` (5 folds) | 5 | ~1-3 min |
+| `test_set` | 1 | ~10-30 s |
+| **Subtotal por (modelo, tarefa)** | **307** | **~35-65 min** |
+
+Para os 3 classificadores TF-IDF x 2 tarefas: ~3-7 horas (CPU local). No Colab CPU: similar.
+
+### Carga BERT total (por modelo, por tarefa)
+
+| Etapa | Fits | Tempo (T4) | Tempo (A100) |
+|-------|------|------------|--------------|
+| Search (25 trials, val unico) | 25 | ~12-25 h | ~3-6 h |
+| `fixed_split` | 1 | ~30-60 min | ~10-20 min |
+| `cv_5fold` (5 folds) | 5 | ~2.5-5 h | ~50 min - 2 h |
+| `test_set` | 1 | ~30-60 min | ~15-25 min |
+| **Subtotal por (modelo, tarefa)** | **32** | **~16-32 h** | **~5-10 h** |
+
+Para os 3 modelos BERT x 2 tarefas: ~96-192 h (T4) ou ~30-60 h (A100). **A100 e a recomendacao** para concluir em 1-3 dias.
+
+### Tabela final (todos os modelos, todas as tarefas)
+
+| Componente | Hardware | Tempo total |
+|-----------|----------|-------------|
+| TF-IDF (M1+M2+M3) x 2 tarefas | i7 local | 3-7 h |
+| BERT (M4a+M4b+M4c) x 2 tarefas | A100 Colab | 30-60 h (1-3 dias) |
+| BERT (M4a+M4b+M4c) x 2 tarefas | T4 Colab | 96-192 h (4-8 dias) |
+| Ensembles + comparacao | i7 local | 10-30 min |
+
+### Mitigacoes para reduzir o orcamento
+
+Se o tempo total for inviavel:
+
+1. **Reduzir `N_ITER_BERT`** de 25 para 10-15 (perde resolucao da busca, mantem o restante).
+2. **Rodar so binario** (comente celulas multiclasse no notebook 05). Reduz pela metade.
+3. **Rodar so 1-2 modelos BERT** (edite `MODELS = [...]`). FinBERT e DeB3RTa podem ser ablacao.
+4. **`N_ITER_TFIDF`** de 60 para 30 (pouco impacto pratico — TF-IDF satura rapido).

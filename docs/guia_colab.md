@@ -6,15 +6,20 @@ Este guia descreve como executar o treino dos 3 modelos BERT (M4a, M4b, M4c) no 
 
 ## Por que usar o Colab?
 
-O treino de modelos BERT exige GPU com VRAM suficiente. A GTX 1650 local (4 GB VRAM) consegue treinar com `batch_size=1`, mas o tempo total estimado e de ~10-14 horas. O Google Colab oferece uma GPU T4 (16 GB VRAM) gratuitamente, permitindo:
+O fluxo agora inclui **busca de hiperparametros** (RandomizedSearchCV) antes dos 3 regimes de avaliacao por modelo. Cada modelo BERT roda 25 trials de busca + 5 folds de CV + 2 single shots por tarefa (binario + multiclasse). Sao **~50+ fits por modelo por tarefa**, totalizando ~300+ fits para os 3 modelos.
 
-| Parametro | Local (GTX 1650) | Colab (T4) |
-|-----------|-----------------|------------|
-| VRAM | 4 GB | 16 GB |
-| Batch size treino | 1 | 8 |
-| Batch efetivo | 8 | 16 |
-| Batch eval | 1-8 | 32 |
-| Tempo estimado (3 modelos) | ~10-14 h | ~2-4 h |
+A GPU T4 (16 GB) e insuficiente para o orcamento completo no tempo disponivel. **A100** (40 GB) e a recomendacao:
+
+| Parametro | T4 (16 GB) | A100 (40 GB) |
+|-----------|-----------|--------------|
+| `per_device_train_batch_size` | 8 | 32 |
+| Tempo medio por trial | ~30-60 min | ~10-15 min |
+| Tempo total (3 modelos x 2 tarefas x ~50 fits) | ~5-10 dias | ~1-3 dias |
+
+Se voce so tem T4 disponivel, ajuste no notebook 05:
+- Reduza `N_ITER_BERT` de 25 para 5-10
+- Comente modelos em `MODELS = [...]` para rodar um por vez
+- Considere rodar so as tarefas binarias (comente as celulas multiclasse)
 
 ---
 
@@ -45,12 +50,12 @@ LOCAL                           COLAB                           LOCAL
 
 ### Passo 1 — Gerar os splits (local)
 
-Execute o notebook `01_preparacao_dados.ipynb` para gerar os splits estratificados. Isso cria os arquivos em `artifacts/splits/`.
+Execute o notebook `01_preparacao_dados.ipynb` para gerar os splits 80/10/10 e os 5 folds da CV. Isso cria os arquivos em `artifacts/splits/`.
 
 ```bash
 # No terminal, verificar que os splits existem:
 ls artifacts/splits/
-# Esperado: balanced_train.parquet  val.parquet  test.parquet  split_metadata.json  ...
+# Esperado: train.parquet  val.parquet  test.parquet  cv_folds.json  split_metadata.json  ...
 ```
 
 ### Passo 2 — Empacotar splits para upload (local)
@@ -106,8 +111,10 @@ My Drive/
 ### Passo 5 — Configurar runtime com GPU
 
 1. No Colab: **Runtime > Change runtime type**
-2. Selecione **T4 GPU**
+2. Selecione **A100 GPU** (recomendado) ou **T4** (com `N_ITER_BERT` reduzido)
 3. Clique em **Save**
+
+A primeira celula do notebook (`## 0. Verificacao de GPU`) emite aviso se a GPU detectada nao for A100.
 
 ### Passo 6 — Ajustar configuracao (se necessario)
 
@@ -127,17 +134,18 @@ DRIVE_FOLDER = "economy-classifier"
 
 Execute as celulas na ordem. O notebook:
 
-1. Verifica a GPU disponivel
-2. Monta o Google Drive
-3. Clona o repositorio e instala o pacote
-4. Extrai os splits do zip
-5. Treina M4a (BERTimbau) — ~40-80 min
-6. Treina M4b (FinBERT) — ~40-80 min
-7. Treina M4c (FinBERT-PT-BR) — ~40-80 min
-8. Exibe tabela comparativa de metricas no split de validacao
-9. Empacota resultados em `colab_bert_results.zip`
+1. Verifica a GPU disponivel (A100 recomendado)
+2. Monta o Google Drive, clona o repositorio, instala o pacote, extrai os splits
+3. Define o protocolo `run_full_protocol(model_key, model_name)` que para cada modelo:
+   - Roda `random_search_bert` para a tarefa **binaria** (25 trials em train+val) → emite `bert_{model}_search_binary/search_result.json`
+   - Roda `random_search_bert` para a tarefa **multiclasse** (25 trials) → emite `bert_{model}_search_multiclass/search_result.json`
+   - Treina e avalia nos 6 regimes (binario/multi x fixed_split/cv_5fold/test_set) com `best_params`, emitindo 6 `result_card.json`
+4. Loop sobre `MODELS = [bertimbau, finbert_ptbr, deb3rta_base]`
+5. Sumario final com 18 result cards (3 modelos x 6 regimes)
 
-**Dica:** Cada modelo e treinado de forma independente. Se a sessao do Colab expirar, execute novamente a partir do modelo que faltou. Os resultados de modelos ja treinados estarao salvos no Drive (`economy-classifier/results/`).
+Saida total: 18 result_cards + 6 search logs por execucao completa. Cada `result_card` carrega o payload `hyperparameter_search` (best_params, best_score, search_seconds, etc).
+
+**Dica para sessoes longas:** Cada modelo e independente. Se a sessao expirar, edite `MODELS = [...]` para rodar so o que faltou. Os resultados ja salvos no Drive (`runs/bert_*`) nao serao retreinados.
 
 ### Passo 8 — Baixar resultados
 
@@ -154,9 +162,9 @@ My Drive/
         predictions_test.csv
         metrics.json
         run_metadata.json
-      {timestamp}-bert-finbert/
-        ...
       {timestamp}-bert-finbert-ptbr/
+        ...
+      {timestamp}-bert-deb3rta-base/
         ...
 ```
 
@@ -173,8 +181,8 @@ Saida esperada:
 ```
 Runs encontrados no zip: 3
   - {timestamp}-bert-training-bertimbau
-  - {timestamp}-bert-training-finbert
   - {timestamp}-bert-training-finbert-ptbr
+  - {timestamp}-bert-training-deb3rta-base
 
 Artefatos extraidos em: /path/to/economy-classifier/artifacts/runs/
 ```
@@ -186,7 +194,6 @@ Os artefatos ficam em `artifacts/runs/`, no formato padrao do projeto. O noteboo
 Com os artefatos BERT integrados, prossiga com os notebooks restantes:
 
 ```
-06_heuristica.ipynb          → Avaliar M5 no val
 07_avaliacao_comparativa.ipynb → Comparacao final no teste
 ```
 
@@ -235,20 +242,28 @@ index,y_true,y_pred,y_score,method
 
 ## Configuracoes de treino no Colab
 
-O notebook usa configuracoes otimizadas para a GPU T4:
+A maioria dos hiperparametros vem da **busca aleatoria** (`random_search_bert`). Apenas os defaults nao-otimizaveis ficam em `BASE_OVERRIDES`:
 
-| Parametro | Valor | Justificativa |
-|-----------|-------|---------------|
-| `per_device_train_batch_size` | 8 | T4 suporta confortavelmente |
-| `gradient_accumulation_steps` | 2 | Batch efetivo = 16 |
-| `per_device_eval_batch_size` | 32 | Inferencia usa menos VRAM |
-| `num_train_epochs` | 3 | Maximo; early stopping pode parar antes |
-| `early_stopping_patience` | 1 | Para se epoca N+1 nao melhora F1 |
-| `save_total_limit` | 2 | Limita checkpoints em disco |
-| `fp16` | True (auto) | Ativado automaticamente com CUDA |
+| Parametro | Valor (BASE_OVERRIDES) | Justificativa |
+|-----------|------------------------|---------------|
 | `max_length` | 256 | Padrao do projeto |
+| `per_device_eval_batch_size` | 64 | A100 suporta confortavelmente |
+| `early_stopping_patience` | 1 | Para se epoca N+1 nao melhora |
+| `save_total_limit` | 1 | Minimiza disco no Colab |
+| `gradient_checkpointing` | False | A100 com 40 GB nao precisa |
 
-Para ajustar, modifique as constantes `COLAB_*` na celula de funcoes auxiliares.
+**Espaco de busca** (`build_bert_search_space`):
+
+| Parametro | Distribuicao | Range |
+|-----------|--------------|-------|
+| `learning_rate` | loguniform | 1e-5 — 5e-5 |
+| `per_device_train_batch_size` | choice | {8, 16, 32} |
+| `num_train_epochs` | int | 2 — 5 |
+| `weight_decay` | loguniform | 1e-3 — 1e-1 |
+| `warmup_ratio` | uniform | 0.0 — 0.2 |
+| `gradient_accumulation_steps` | choice | {1, 2, 4} |
+
+Para ajustar, modifique `BASE_OVERRIDES`, `SEARCH_SPACE` ou `N_ITER_BERT` na celula de configuracao.
 
 ---
 
@@ -282,9 +297,9 @@ Verifique se:
 - A variavel `DRIVE_FOLDER` corresponde ao nome exato da pasta no Drive
 - O Google Drive foi montado com sucesso
 
-### Modelo FinBERT (M4b) com desempenho baixo
+### DeB3RTa requer SentencePiece
 
-Esperado: o FinBERT foi pre-treinado em ingles, e o fine-tuning em portugues pode nao transferir bem. Compare com as outras variantes antes de concluir.
+DeB3RTa-base usa tokenizer SentencePiece (DeBERTa-v2). No Colab, instale com `pip install sentencepiece` se a celula de bootstrap nao instalar automaticamente. Localmente, certifique-se que `sentencepiece` esta listado no `pyproject.toml`.
 
 ---
 

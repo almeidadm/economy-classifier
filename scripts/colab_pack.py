@@ -22,9 +22,10 @@ SPLITS_DIR = PROJECT_ROOT / "artifacts" / "splits"
 OUTPUT_ZIP = PROJECT_ROOT / "colab_splits.zip"
 
 REQUIRED_FILES = [
-    "balanced_train.parquet",
+    "train.parquet",
     "val.parquet",
     "test.parquet",
+    "cv_folds.json",
     "split_metadata.json",
     "train_indices.csv",
     "val_indices.csv",

@@ -20,9 +20,8 @@ Sete metodos sao avaliados. Os seis primeiros sao supervisionados e compartilham
 | M2 | TF-IDF + LinearSVC | Linear, margem maxima | Sim |
 | M3 | TF-IDF + Multinomial Naive Bayes | Probabilistico, generativo | Sim |
 | M4a | BERT fine-tuned (BERTimbau) | Neural, Transformer | Sim |
-| M4b | BERT fine-tuned (FinBERT) | Neural, Transformer | Sim |
-| M4c | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer | Sim |
-| M5 | Heuristica lexical ponderada | Baseado em regras | Nao |
+| M4b | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer | Sim |
+| M4c | DeBERTa fine-tuned (DeB3RTa-base) | Neural, Transformer | Sim |
 
 ### 2.2 Configuracoes dos metodos TF-IDF (M1, M2, M3)
 
@@ -55,8 +54,8 @@ Tres modelos BERT sao avaliados sob condicoes identicas de fine-tuning. A unica 
 | Variante | `model_name` | Origem | Justificativa |
 |----------|-------------|--------|---------------|
 | M4a | `neuralmind/bert-base-portuguese-cased` | BERTimbau | Pre-treino generalista em PT-BR |
-| M4b | `ProsusAI/finbert` | FinBERT | Pre-treino em textos financeiros em ingles |
-| M4c | `lucas-leme/FinBERT-PT-BR` | FinBERT-PT-BR | Pre-treino financeiro adaptado para PT-BR |
+| M4b | `lucas-leme/FinBERT-PT-BR` | FinBERT-PT-BR | Pre-treino financeiro adaptado para PT-BR |
+| M4c | `higopires/DeB3RTa-base` | DeB3RTa | DeBERTa-v2 pre-treinado em corpus financeiro PT (MDPI BDCC 2025 9(3):51) |
 
 **Hiperparametros compartilhados (identicos para M4a, M4b, M4c):**
 
@@ -75,29 +74,11 @@ Tres modelos BERT sao avaliados sob condicoes identicas de fine-tuning. A unica 
 
 **Early stopping:** Baseado no F1 do split de validacao. Patience de 1 epoca (com 3 epocas, isso significa que o treino para se a epoca 2 nao melhorar em relacao a epoca 1).
 
-**Nota sobre FinBERT (M4b):** O FinBERT foi pre-treinado em textos financeiros em ingles. Embora o dominio seja relevante, o idioma difere do corpus. O fine-tuning permite avaliar se o conhecimento financeiro transfere entre linguas.
+**Nota sobre FinBERT-PT-BR (M4b):** Combina dominio financeiro e idioma PT-BR via fine-tuning de BERT.
 
-**Nota sobre FinBERT-PT-BR (M4c):** Combina dominio financeiro e idioma PT-BR. Espera-se que seja o mais adequado para a tarefa, mas a avaliacao empirica confirmara.
+**Nota sobre DeB3RTa (M4c):** Apresentado em Pires et al. (MDPI BDCC 2025 9(3):51), e o primeiro modelo DeBERTa-v2 pre-treinado em corpus financeiro PT-BR (~71M parametros, tokenizer SentencePiece). Permite contraste arquitetural BERT vs DeBERTa no mesmo dominio.
 
-### 2.4 Configuracao da heuristica (M5)
-
-| Componente | Especificacao |
-|------------|---------------|
-| Catalogo | 195 termos em 7 temas |
-| Niveis de sinal | nuclear=4, setorial=3, contextual=2, fraco=1 |
-| Penalidades de contexto | automotivo, editorial, tecnico, politico-social |
-| Normalizacao | `log1p(word_count)` |
-| Limiar mercado (estrito) | `score >= 2.6` AND presenca de sinal forte |
-| Limiar ambiguo | `score >= 1.0` |
-
-**Modos de avaliacao:**
-
-| Modo | Definicao de positivo | Uso |
-|------|----------------------|-----|
-| Estrito | Somente banda `mercado` | Metrica principal para comparacao |
-| Leniente | Bandas `mercado` + `ambiguo` | Analise de sensibilidade |
-
-### 2.5 Estrategias de ensemble
+### 2.4 Estrategias de ensemble
 
 Quatro estrategias sao avaliadas sobre as predicoes dos 7 metodos base.
 
@@ -233,8 +214,7 @@ splits → treino M2 → predicoes M2 ─┤
 splits → treino M3 → predicoes M3 ─┼─→ ensemble → avaliacao final
 splits → treino M4a → predicoes M4a ─┤
 splits → treino M4b → predicoes M4b ─┤
-splits → treino M4c → predicoes M4c ─┤
-         heuristica → predicoes M5 ─┘
+splits → treino M4c → predicoes M4c ─┘
 ```
 
 ### 4.4 Versionamento
@@ -285,7 +265,6 @@ tests/
     test_datasets.py            ← Splits, balanceamento, invariantes
     test_tfidf.py               ← Pipeline TF-IDF (treino, predicao, serializacao)
     test_bert.py                ← Pipeline BERT (configuracao, tokenizacao, predicao para M4a/M4b/M4c)
-    test_heuristics.py          ← Scoring, bandas, cobertura
     test_evaluation.py          ← Metricas, McNemar, AUC-ROC
     test_ensemble.py            ← Votacao, stacking, concordancia
     test_integration.py         ← Fluxo completo com dados sinteticos
@@ -329,7 +308,6 @@ def known_predictions() -> tuple[pd.Series, pd.Series]:
 | `ensemble` | `test_majority_vote_tie` | Comportamento definido em empate (numero impar de metodos, verificar limiar) |
 | `ensemble` | `test_stacking_no_leakage` | Meta-classificador treinado em val, nao em treino |
 | `tfidf` | `test_pipeline_roundtrip` | Salvar e carregar pipeline produz predicoes identicas |
-| `heuristics` | `test_known_terms_score` | Termos nucleares produzem score >= limiar mercado |
 
 ### 5.5 Execucao
 
@@ -449,9 +427,7 @@ index,y_true,y_pred,y_score,method
 | `y_true` | int (0/1) | Label real |
 | `y_pred` | int (0/1) | Predicao binaria |
 | `y_score` | float [0,1] | Score continuo (probabilidade ou score normalizado) |
-| `method` | str | Identificador do metodo (ex: `logreg`, `linearsvc`, `nb`, `bertimbau`, `finbert`, `finbert_ptbr`, `heuristic_strict`) |
-
-**Para a heuristica**, `y_score` e o score heuristico normalizado para [0,1]. `y_pred` depende do modo (estrito ou leniente).
+| `method` | str | Identificador do metodo (ex: `logreg`, `linearsvc`, `nb`, `bertimbau`, `finbert_ptbr`, `deb3rta_base`) |
 
 ### 7.4 Metricas — formato padrao
 
@@ -530,9 +506,8 @@ A tabela tem uma linha por metodo/ensemble e as seguintes colunas:
 | `03_tfidf_linearsvc.ipynb` | Treino e avaliacao de M2 no val | M2 |
 | `04_tfidf_multinomialnb.ipynb` | Treino e avaliacao de M3 no val | M3 |
 | `05_bert_bertimbau.ipynb` | Treino e avaliacao de M4a no val | M4a |
-| `05b_bert_finbert.ipynb` | Treino e avaliacao de M4b no val | M4b |
-| `05c_bert_finbert_ptbr.ipynb` | Treino e avaliacao de M4c no val | M4c |
-| `06_heuristica.ipynb` | Avaliacao de M5 no val (estrito + leniente) | M5 |
+| `05b_bert_finbert_ptbr.ipynb` | Treino e avaliacao de M4b no val | M4b |
+| `05c_bert_deb3rta.ipynb` | Treino e avaliacao de M4c no val | M4c |
 | `07_avaliacao_comparativa.ipynb` | Comparacao no val, ensembles, avaliacao final no teste | Todos + E1-E4 |
 
 ---
@@ -561,7 +536,6 @@ def evaluate_*(y_true, y_pred, y_score) -> dict
 | `datasets.py` | `build_train_val_test_split()`, `build_balanced_training_frame()` |
 | `tfidf.py` | `train_tfidf_classifier()`, `load_tfidf_pipeline()`, `predict_texts()` |
 | `bert.py` | `train_bert_classifier()`, `predict_texts()` |
-| `heuristics.py` | `score_text()`, `classify_score()` |
 | `evaluation.py` | `compute_binary_metrics()`, `compute_mcnemar_test()`, `compute_roc_auc()` |
 | `ensemble.py` | `majority_vote()`, `weighted_vote()`, `train_stacking_classifier()`, `compute_agreement_matrix()` |
 | `project.py` | `create_run_directory()`, `build_run_metadata()`, `persist_run_artifacts()` |

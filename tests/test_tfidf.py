@@ -1,5 +1,7 @@
 """Tests for economy_classifier.tfidf — TF-IDF pipeline (M1, M2, M3)."""
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -7,11 +9,15 @@ from economy_classifier.datasets import (
     build_balanced_training_frame,
     build_train_val_test_split,
 )
+from economy_classifier.datasets import attach_multiclass_label
 from economy_classifier.tfidf import (
+    TfidfMulticlassConfig,
     TfidfTrainingConfig,
+    get_pipeline_n_parameters,
     load_tfidf_pipeline,
     predict_texts,
     train_tfidf_classifier,
+    train_tfidf_multiclass,
 )
 
 
@@ -151,3 +157,92 @@ def test_train_with_synthetic_data(synthetic_corpus, tmp_path):
     )
     assert result["metrics"]["f1"] > 0
     assert len(result["predictions"]) == len(val)
+
+
+# ---------------------------------------------------------------------------
+# Multiclass — Fase 2: support all three classifiers (logreg/linearsvc/nb)
+# ---------------------------------------------------------------------------
+
+
+def _multi_synthetic(synthetic_corpus):
+    """Add fake categories so the synthetic binary corpus has multi labels."""
+    df = synthetic_corpus.copy()
+    # Spread the 175 'outros' across a few categories so multiclass has signal.
+    cats = []
+    for i, lab in enumerate(df["label"].tolist()):
+        if lab == 1:
+            cats.append("mercado")
+        else:
+            cats.append(["poder", "esporte", "mundo", "ilustrada"][i % 4])
+    df["category"] = cats
+    return attach_multiclass_label(df)
+
+
+@pytest.mark.parametrize("classifier", ["logreg", "linearsvc", "multinomialnb"])
+@pytest.mark.parametrize("strategy", ["native", "ovr"])
+def test_train_tfidf_multiclass_all_classifiers(synthetic_corpus, tmp_path, classifier, strategy):
+    df = _multi_synthetic(synthetic_corpus)
+    train, val, _ = build_train_val_test_split(df, seed=42)
+    config = TfidfMulticlassConfig(
+        classifier=classifier, strategy=strategy,
+        max_features=100, min_df=1,
+    )
+    result = train_tfidf_multiclass(
+        train, val, label_column="label_multi", run_dir=tmp_path, config=config,
+    )
+    assert "metrics" in result
+    assert result["metrics"]["macro_f1"] >= 0
+    assert len(result["predictions"]) == len(val)
+    assert result["predictions"]["method"].iloc[0] == f"tfidf_{classifier}_{strategy}"
+
+
+def test_train_tfidf_multiclass_rejects_invalid_strategy(synthetic_corpus, tmp_path):
+    df = _multi_synthetic(synthetic_corpus)
+    train, val, _ = build_train_val_test_split(df, seed=42)
+    config = TfidfMulticlassConfig(strategy="bogus")
+    with pytest.raises(ValueError):
+        train_tfidf_multiclass(
+            train, val, label_column="label_multi", run_dir=tmp_path, config=config,
+        )
+
+
+def test_get_pipeline_n_parameters_logreg(trained_logreg):
+    pipeline = load_tfidf_pipeline(Path(trained_logreg["model_dir"]))
+    n = get_pipeline_n_parameters(pipeline)
+    assert n is not None and n > 0
+
+
+def test_get_pipeline_n_parameters_multinomialnb(synthetic_corpus, tmp_path):
+    train, val, _ = build_train_val_test_split(synthetic_corpus, seed=42)
+    balanced = build_balanced_training_frame(train, seed=42)
+    train_tfidf_classifier(
+        balanced, val, run_dir=tmp_path, config=_small_config("multinomialnb"),
+    )
+    pipeline = load_tfidf_pipeline(tmp_path / "model")
+    n = get_pipeline_n_parameters(pipeline)
+    assert n is not None and n > 0
+
+
+def test_get_pipeline_n_parameters_linearsvc(synthetic_corpus, tmp_path):
+    train, val, _ = build_train_val_test_split(synthetic_corpus, seed=42)
+    balanced = build_balanced_training_frame(train, seed=42)
+    train_tfidf_classifier(
+        balanced, val, run_dir=tmp_path, config=_small_config("linearsvc"),
+    )
+    pipeline = load_tfidf_pipeline(tmp_path / "model")
+    n = get_pipeline_n_parameters(pipeline)
+    assert n is not None and n > 0
+
+
+def test_get_pipeline_n_parameters_multiclass_ovr(synthetic_corpus, tmp_path):
+    df = _multi_synthetic(synthetic_corpus)
+    train, val, _ = build_train_val_test_split(df, seed=42)
+    config = TfidfMulticlassConfig(
+        classifier="logreg", strategy="ovr", max_features=100, min_df=1,
+    )
+    train_tfidf_multiclass(
+        train, val, label_column="label_multi", run_dir=tmp_path, config=config,
+    )
+    pipeline = load_tfidf_pipeline(tmp_path / "model")
+    n = get_pipeline_n_parameters(pipeline)
+    assert n is not None and n > 0

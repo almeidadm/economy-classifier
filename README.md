@@ -14,31 +14,29 @@ Este repositorio e a bancada experimental de uma **dissertacao de mestrado** sob
 | M2 | TF-IDF + LinearSVC | Linear, margem maxima |
 | M3 | TF-IDF + Multinomial Naive Bayes | Probabilistico, generativo |
 | M4a | BERT fine-tuned (BERTimbau) | Neural, Transformer |
-| M4b | BERT fine-tuned (FinBERT) | Neural, Transformer |
-| M4c | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer |
-| M5 | Heuristica lexical ponderada | Baseado em regras |
+| M4b | BERT fine-tuned (FinBERT-PT-BR) | Neural, Transformer |
+| M4c | DeBERTa fine-tuned (DeB3RTa-base) | Neural, Transformer |
 
 ## Estrutura do repositorio
 
 ```
 economy-classifier/
     src/economy_classifier/     # Modulos reutilizaveis
-        datasets.py             #   Splits 3-way estratificados + balanceamento
-        tfidf.py                #   Pipeline TF-IDF (LogReg, LinearSVC, NB)
-        bert.py                 #   Fine-tuning BERT (BERTimbau, FinBERT, FinBERT-PT-BR)
-        heuristics.py           #   Scoring heuristico (195 termos, 7 temas)
-        evaluation.py           #   Metricas, McNemar, AUC-ROC
+        datasets.py             #   Splits 80/10/10 + StratifiedKFold(5) sobre o pool train+val
+        tfidf.py                #   Pipeline TF-IDF (LogReg, LinearSVC, NB) + variantes multiclasse
+        bert.py                 #   Fine-tuning Transformer (BERTimbau, FinBERT-PT-BR, DeB3RTa)
+        hyperparameter_search.py #   RandomizedSearchCV (TF-IDF) + busca custom (BERT)
+        evaluation.py           #   Metricas binarias e multiclasse, McNemar, AUC-ROC
         ensemble.py             #   Votacao, stacking, concordancia
-        project.py              #   Runs, artefatos, metadados
+        project.py              #   Runs, artefatos, result_card
         visualization.py        #   Figuras em PNG 300 DPI + PDF
-    tests/                      # 96 testes (pytest)
+    tests/                      # 200 testes (pytest)
     notebooks/                  # Orquestracao do pipeline
-        01_preparacao_dados     #   Carga, binarizacao, splits, persistencia
-        02_tfidf_logreg         #   M1 treino + avaliacao
-        03_tfidf_linearsvc      #   M2 treino + avaliacao
-        04_tfidf_multinomialnb  #   M3 treino + avaliacao
-        05_bert_colab           #   M4a/M4b/M4c treino (Google Colab)
-        06_heuristica           #   M5 avaliacao (estrito + leniente)
+        01_preparacao_dados     #   Carga, binarizacao, splits 80/10/10, cv_folds.json
+        02_tfidf_logreg         #   M1: search + 6 regimes (binario/multi x fixed/cv/test)
+        03_tfidf_linearsvc      #   M2: search + 6 regimes
+        04_tfidf_multinomialnb  #   M3: search + 6 regimes
+        05_bert_colab           #   M4a/M4b/M4c: search + 6 regimes (Google Colab A100)
     scripts/                    # Utilidades
         colab_pack.py           #   Empacotar splits para upload ao Colab
         colab_unpack.py         #   Integrar resultados do Colab localmente
@@ -73,7 +71,7 @@ uv run pytest                   # todos (96 testes)
 uv run pytest -m "not slow"     # somente rapidos
 ```
 
-### Pipeline local (TF-IDF + heuristica)
+### Pipeline local (TF-IDF)
 
 1. Obtenha o dataset da Folha de Sao Paulo e coloque em `data/news-of-the-site-folhauol/articles.csv`
 2. Execute os notebooks na ordem:
@@ -81,20 +79,19 @@ uv run pytest -m "not slow"     # somente rapidos
 ```bash
 # 01: gerar splits
 # 02-04: treinar M1, M2, M3
-# 06: avaliar M5
 ```
 
 ### Pipeline BERT (Google Colab)
 
-Os modelos BERT sao treinados no Google Colab (GPU T4) para viabilizar o treino com VRAM limitada localmente. Veja o [guia completo](docs/guia_colab.md).
+Os modelos BERT sao treinados no Google Colab com **GPU A100** (necessaria para o orcamento da busca de hiperparametros). Em T4 multiplique tempos por 3-5x ou reduza `N_ITER_BERT`/`MODELS`. Veja o [guia completo](docs/guia_colab.md).
 
 ```bash
 # 1. Empacotar splits para upload
 uv run python scripts/colab_pack.py
 
 # 2. Upload colab_splits.zip para Google Drive
-# 3. Abrir notebooks/05_bert_colab.ipynb no Colab
-# 4. Executar treino (~2-4h com GPU T4)
+# 3. Abrir notebooks/05_bert_colab.ipynb no Colab (Runtime > A100)
+# 4. Executar (search + 6 regimes x 3 modelos ~ 1-3 dias em A100)
 
 # 5. Baixar resultados e integrar
 uv run python scripts/colab_unpack.py colab_bert_results.zip
@@ -102,12 +99,18 @@ uv run python scripts/colab_unpack.py colab_bert_results.zip
 
 ## Protocolo experimental
 
-- **Splits**: treino (64%), validacao (16%), teste (20%) — estratificados, seed=42
-- **Balanceamento**: downsample da classe majoritaria somente no treino
-- **Metrica primaria**: F1-score (accuracy e enganosa com 87,5% de classe majoritaria)
-- **Comparacao**: McNemar test entre pares de classificadores
-- **Ensembles**: votacao majoritaria, votacao ponderada (F1), stacking (meta-LogReg), concordancia
-- **Reproducibilidade**: seed=42 em todos os pontos de aleatoriedade, artefatos com metadados
+- **Splits**: treino (80%), validacao (10%), teste (10%) — estratificados, seed=42. Test fixo de 10% **nunca** e usado para selecao.
+- **Cross-validation**: `StratifiedKFold(5, seed=42)` sobre o pool train+val (90%), persistida em `artifacts/splits/cv_folds.json`.
+- **Balanceamento**: nenhum no fluxo padrao (val e teste preservam ~12,5% de mercado).
+- **Busca de hiperparametros**: `RandomizedSearchCV` por modelo, em train+val (90%), antes dos 3 regimes de avaliacao.
+  - TF-IDF: 60 trials, inner `StratifiedKFold(5, seed=43)` (folds independentes do `cv_folds.json`).
+  - BERT: 25 trials, val unico como inner (custo de inner-CV proibitivo). Asimetria declarada no `result_card`.
+- **3 regimes por modelo**: `fixed_split` (treina train, avalia val), `cv_5fold` (5 folds com best_params), `test_set` (treina train+val, avalia teste FIXO).
+- **Metrica primaria**: F1-score (binario) ou macro-F1 (multiclasse). Accuracy e enganosa.
+- **Comparacao**: McNemar test entre pares no test_set.
+- **Ensembles**: votacao majoritaria, votacao ponderada (F1), stacking (meta-LogReg), concordancia.
+- **Result card**: cada regime emite `result_card.json` com metricas + custo (`train_seconds`, `inference_seconds`, `model_size_mb`, `n_parameters`, `hardware`) + payload da busca (`hyperparameter_search`).
+- **Reproducibilidade**: seed=42 em todos os pontos, `uv.lock` determinista, artefatos com metadados.
 
 ## Documentacao
 

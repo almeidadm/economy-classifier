@@ -20,9 +20,8 @@ if TYPE_CHECKING:
 
 MODEL_REGISTRY = {
     "bertimbau": "neuralmind/bert-base-portuguese-cased",
-    "finbert": "ProsusAI/finbert",
     "finbert_ptbr": "lucas-leme/FinBERT-PT-BR",
-    "albertina_brwac": "PORTULAN/albertina-900m-portuguese-ptbr-encoder-brwac",
+    "deb3rta_base": "higopires/DeB3RTa-base",
 }
 
 LABELS = {0: "outros", 1: "mercado"}
@@ -72,7 +71,11 @@ def _tokenize_dataframe(
     text_column: str = "text",
     label_column: str = "label",
 ):
-    """Tokenize a DataFrame and return a HuggingFace Dataset."""
+    """Tokenize a DataFrame and return a HuggingFace Dataset.
+
+    The ``label_column`` value (already encoded as int when used for multiclass)
+    is exposed as ``labels`` to satisfy the HuggingFace Trainer convention.
+    """
     from datasets import Dataset
 
     texts = df[text_column].fillna("").tolist()
@@ -163,7 +166,7 @@ def train_bert_classifier(
     )
     model.config.problem_type = "single_label_classification"
     # Ensure weights are fp32 so the Trainer's fp16 GradScaler works correctly
-    # (some checkpoints, e.g. DeBERTa V2 Albertina, store weights in bf16).
+    # (some DeBERTa V2 checkpoints store weights in bf16).
     model.float()
 
     train_dataset = _tokenize_dataframe(train_df, tokenizer, config.max_length)
@@ -239,6 +242,189 @@ def train_bert_classifier(
         "model_dir": str(model_dir),
         "predictions": predictions,
         "timing": {"train_seconds": round(train_time, 2)},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Multiclass (Fase 2) — separate from binary helpers above.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class BertMulticlassConfig(BertTrainingConfig):
+    """BERT multiclass config. ``label_set`` is the ordered tuple of class strings."""
+
+    label_set: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "model_name": self.model_name,
+            "max_length": self.max_length,
+            "learning_rate": self.learning_rate,
+            "per_device_train_batch_size": self.per_device_train_batch_size,
+            "per_device_eval_batch_size": self.per_device_eval_batch_size,
+            "gradient_accumulation_steps": self.gradient_accumulation_steps,
+            "num_train_epochs": self.num_train_epochs,
+            "weight_decay": self.weight_decay,
+            "warmup_ratio": self.warmup_ratio,
+            "seed": self.seed,
+            "early_stopping_patience": self.early_stopping_patience,
+            "save_total_limit": self.save_total_limit,
+            "gradient_checkpointing": self.gradient_checkpointing,
+            "label_set": list(self.label_set),
+        }
+
+
+def _compute_metrics_multiclass(eval_pred):
+    from sklearn.metrics import accuracy_score, f1_score
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    return {
+        "macro_f1": float(f1_score(labels, predictions, average="macro", zero_division=0)),
+        "accuracy": float(accuracy_score(labels, predictions)),
+    }
+
+
+def _encode_label_column(
+    df: pd.DataFrame, label_column: str, label_to_id: dict[str, int],
+) -> pd.DataFrame:
+    out = df.copy()
+    encoded = out[label_column].map(label_to_id)
+    if encoded.isna().any():
+        unknown = sorted(set(out.loc[encoded.isna(), label_column].tolist()))
+        raise ValueError(
+            f"Labels not in label_set: {unknown}. Provide them via BertMulticlassConfig.label_set."
+        )
+    out["_label_id"] = encoded.astype(int)
+    return out
+
+
+def train_bert_multiclass(
+    train_df: pd.DataFrame,
+    validation_df: pd.DataFrame,
+    *,
+    label_column: str = "label_multi",
+    run_dir: str | Path,
+    config: BertMulticlassConfig | None = None,
+) -> dict[str, object]:
+    """Fine-tune BERT for multiclass classification.
+
+    ``config.label_set`` must enumerate every class string present in the data.
+    Predictions are returned with the original string labels (decoded).
+    """
+    if config is None or not config.label_set:
+        raise ValueError(
+            "BertMulticlassConfig.label_set must be a non-empty tuple of class strings."
+        )
+
+    label_set = list(config.label_set)
+    label_to_id = {label: i for i, label in enumerate(label_set)}
+    id_to_label = {i: label for label, i in label_to_id.items()}
+    num_labels = len(label_set)
+
+    run_path = Path(run_dir)
+    model_dir = run_path / "model"
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        config.model_name,
+        num_labels=num_labels,
+        id2label=id_to_label,
+        label2id=label_to_id,
+        ignore_mismatched_sizes=True,
+    )
+    model.config.problem_type = "single_label_classification"
+    model.float()
+
+    train_enc = _encode_label_column(train_df, label_column, label_to_id)
+    val_enc = _encode_label_column(validation_df, label_column, label_to_id)
+
+    train_dataset = _tokenize_dataframe(
+        train_enc, tokenizer, config.max_length, label_column="_label_id",
+    )
+    val_dataset = _tokenize_dataframe(
+        val_enc, tokenizer, config.max_length, label_column="_label_id",
+    )
+
+    training_args = TrainingArguments(
+        output_dir=str(run_path / "checkpoints"),
+        num_train_epochs=config.num_train_epochs,
+        per_device_train_batch_size=config.per_device_train_batch_size,
+        per_device_eval_batch_size=config.per_device_eval_batch_size,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
+        learning_rate=config.learning_rate,
+        weight_decay=config.weight_decay,
+        warmup_ratio=config.warmup_ratio,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        metric_for_best_model="macro_f1",
+        seed=config.seed,
+        fp16=torch.cuda.is_available(),
+        gradient_checkpointing=config.gradient_checkpointing,
+        disable_tqdm=False,
+        logging_steps=100,
+        save_total_limit=config.save_total_limit,
+    )
+
+    from transformers import EarlyStoppingCallback
+
+    t0 = time.perf_counter()
+    trainer = _create_trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        compute_metrics=_compute_metrics_multiclass,
+        callbacks=[EarlyStoppingCallback(
+            early_stopping_patience=config.early_stopping_patience,
+        )],
+    )
+    trainer.train()
+    train_time = time.perf_counter() - t0
+
+    try:
+        from transformers.utils.notebook import NotebookProgressCallback
+        trainer.remove_callback(NotebookProgressCallback)
+    except Exception:
+        pass
+
+    metrics = trainer.evaluate()
+
+    trainer.save_model(str(model_dir))
+    tokenizer.save_pretrained(str(model_dir))
+
+    t0 = time.perf_counter()
+    val_output = trainer.predict(val_dataset)
+    inference_time = time.perf_counter() - t0
+
+    y_pred_ids = np.argmax(val_output.predictions, axis=-1)
+    y_pred = [id_to_label[int(i)] for i in y_pred_ids]
+
+    method_key = next(
+        (k for k, v in MODEL_REGISTRY.items() if v == config.model_name),
+        config.model_name,
+    )
+
+    import pandas as pd
+    predictions = pd.DataFrame({
+        "index": validation_df.index.tolist(),
+        "y_true": validation_df[label_column].tolist(),
+        "y_pred": y_pred,
+        "method": f"{method_key}_multiclass",
+    })
+
+    return {
+        "metrics": metrics,
+        "model_dir": str(model_dir),
+        "predictions": predictions,
+        "timing": {
+            "train_seconds": round(train_time, 2),
+            "inference_seconds": round(inference_time, 2),
+        },
+        "n_parameters": int(model.num_parameters()),
+        "label_set": label_set,
     }
 
 

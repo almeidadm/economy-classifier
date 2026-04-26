@@ -78,3 +78,33 @@ def plot_comparative_barplot(metrics_df, *, metric: str = "f1") -> Figure:
     ax.set_ylabel("")
     ax.set_title(f"Comparativo — {metric.upper()}")
     return fig
+
+
+def plot_agreement_heatmap(matrix, *, title: str = "") -> Figure:
+    """Annotated heatmap of pairwise Cohen's Kappa agreement."""
+    import numpy as np
+
+    mask = np.eye(len(matrix), dtype=bool)
+    fig, ax = plt.subplots(figsize=(max(6, len(matrix) * 0.9), max(5, len(matrix) * 0.8)))
+    sns.heatmap(
+        matrix, annot=True, fmt=".3f", cmap="YlOrRd",
+        mask=mask, vmin=0, vmax=1, ax=ax, square=True,
+        linewidths=0.5,
+    )
+    if title:
+        ax.set_title(title)
+    return fig
+
+
+def plot_ensemble_comparison(metrics_df, *, baseline_f1: float | None = None, metric: str = "f1") -> Figure:
+    """Horizontal barplot with optional baseline reference line."""
+    df = metrics_df.sort_values(metric, ascending=True).copy()
+    fig, ax = plt.subplots(figsize=(9, max(4, len(df) * 0.45)))
+    sns.barplot(data=df, x=metric, y="method", ax=ax, orient="h", palette="viridis")
+    if baseline_f1 is not None:
+        ax.axvline(x=baseline_f1, color="red", linestyle="--", linewidth=1.5, label=f"Melhor individual (F1={baseline_f1:.4f})")
+        ax.legend(loc="lower right", fontsize=9)
+    ax.set_xlabel(f"{metric.upper()}")
+    ax.set_ylabel("")
+    ax.set_title(f"Ensembles vs Individuais — {metric.upper()}")
+    return fig

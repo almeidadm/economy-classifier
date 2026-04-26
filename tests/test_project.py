@@ -3,11 +3,15 @@
 import json
 
 import pandas as pd
+import pytest
 
 from economy_classifier.project import (
+    build_result_card,
     build_run_metadata,
+    compute_artifact_size_mb,
     create_run_directory,
     get_git_commit_short,
+    persist_result_card,
     persist_run_artifacts,
     slugify,
 )
@@ -110,3 +114,82 @@ def test_get_git_commit_short_returns_string():
     result = get_git_commit_short()
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+def test_build_result_card_minimal():
+    card = build_result_card(
+        model_id="tfidf_logreg", task="binary", regime="fixed_split",
+        metrics={"f1": 0.81}, cost={"train_seconds_mean": 2.0}, config={"C": 1.0},
+    )
+    assert card["model_id"] == "tfidf_logreg"
+    assert card["task"] == "binary"
+    assert card["regime"] == "fixed_split"
+    assert card["metrics"]["f1"] == 0.81
+    assert "git_commit" in card and "generated_at" in card
+
+
+def test_build_result_card_rejects_invalid_task():
+    with pytest.raises(ValueError):
+        build_result_card(
+            model_id="x", task="ternary", regime="fixed_split",
+            metrics={}, cost={}, config={},
+        )
+
+
+def test_build_result_card_rejects_invalid_regime():
+    with pytest.raises(ValueError):
+        build_result_card(
+            model_id="x", task="binary", regime="kfold_99",
+            metrics={}, cost={}, config={},
+        )
+
+
+def test_build_result_card_with_hyperparameter_search():
+    card = build_result_card(
+        model_id="tfidf_logreg", task="binary", regime="test_set",
+        metrics={"f1": 0.83}, cost={}, config={"C": 0.5},
+        hyperparameter_search={
+            "best_params": {"C": 0.5, "ngram_range": [1, 2]},
+            "best_score": 0.812,
+            "n_trials": 60,
+            "search_seconds": 320.5,
+            "scoring": "f1",
+            "search_space": {"clf__C": {"type": "loguniform", "args": [0.001, 100]}},
+        },
+    )
+    assert card["hyperparameter_search"]["n_trials"] == 60
+    assert card["hyperparameter_search"]["best_params"]["C"] == 0.5
+
+
+def test_build_result_card_default_hyperparameter_search_is_none():
+    card = build_result_card(
+        model_id="x", task="binary", regime="fixed_split",
+        metrics={}, cost={}, config={},
+    )
+    assert card["hyperparameter_search"] is None
+
+
+def test_persist_result_card_writes_json(tmp_path):
+    card = build_result_card(
+        model_id="x", task="binary", regime="test_set",
+        metrics={"f1": 0.5}, cost={}, config={},
+    )
+    out = persist_result_card(card, tmp_path)
+    assert out == tmp_path / "result_card.json"
+    loaded = json.loads(out.read_text())
+    assert loaded["model_id"] == "x"
+
+
+def test_compute_artifact_size_mb_file(tmp_path):
+    f = tmp_path / "model.bin"
+    f.write_bytes(b"x" * 2_000_000)
+    size = compute_artifact_size_mb(f)
+    assert 1.9 < size < 2.1
+
+
+def test_compute_artifact_size_mb_directory(tmp_path):
+    (tmp_path / "a.bin").write_bytes(b"x" * 1_000_000)
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.bin").write_bytes(b"x" * 500_000)
+    size = compute_artifact_size_mb(tmp_path)
+    assert 1.4 < size < 1.6

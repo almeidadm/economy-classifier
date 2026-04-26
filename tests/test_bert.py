@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 import economy_classifier.bert as bert
-from economy_classifier.bert import BertTrainingConfig, MODEL_REGISTRY
+from economy_classifier.bert import BertMulticlassConfig, BertTrainingConfig, MODEL_REGISTRY
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +107,7 @@ def _patch_training(monkeypatch):
     fake_model = type("FM", (), {
         "config": fake_config,
         "float": lambda self: self,
+        "num_parameters": lambda self: 110_000_000,
     })()
     monkeypatch.setattr(
         bert, "AutoModelForSequenceClassification",
@@ -276,5 +277,90 @@ def test_training_saves_tokenizer(monkeypatch, synthetic_corpus, tmp_path):
 
 def test_method_identifiers():
     assert "bertimbau" in MODEL_REGISTRY
-    assert "finbert" in MODEL_REGISTRY
     assert "finbert_ptbr" in MODEL_REGISTRY
+    assert "deb3rta_base" in MODEL_REGISTRY
+
+
+# ---------------------------------------------------------------------------
+# Multiclass training tests (Fase 2) — fully mocked, label encoding focus
+# ---------------------------------------------------------------------------
+
+
+def _patch_multiclass_training(monkeypatch, label_set):
+    captured: dict = {}
+
+    class FakeTrainer:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+        def train(self): pass
+        def evaluate(self): return {"eval_macro_f1": 0.6}
+        def save_model(self, path): Path(path).mkdir(parents=True, exist_ok=True)
+        def remove_callback(self, _): pass
+        def predict(self, dataset):
+            n = len(dataset)
+            preds = np.random.RandomState(7).randn(n, len(label_set))
+            return type("PredOut", (), {"predictions": preds})()
+
+    monkeypatch.setattr(
+        bert, "_tokenize_dataframe",
+        lambda df, tok, ml, **kw: _FakeDataset(len(df)),
+    )
+    monkeypatch.setattr(
+        bert, "AutoTokenizer",
+        type("AT", (), {"from_pretrained": staticmethod(lambda *a, **k: _FakeTokenizerForTraining())}),
+    )
+    fake_config = type("Cfg", (), {"problem_type": None})()
+    fake_model = type("FM", (), {
+        "config": fake_config,
+        "float": lambda self: self,
+        "num_parameters": lambda self: 110_000_000,
+    })()
+    monkeypatch.setattr(
+        bert, "AutoModelForSequenceClassification",
+        type("AM", (), {"from_pretrained": staticmethod(lambda *a, **k: fake_model)}),
+    )
+    monkeypatch.setattr(bert, "_create_trainer", lambda **kw: FakeTrainer(**kw))
+    return captured
+
+
+def test_bert_multiclass_config_requires_label_set(synthetic_corpus, tmp_path):
+    import pytest
+    df = synthetic_corpus.copy()
+    df["label_multi"] = "mercado"
+    config = BertMulticlassConfig(label_set=())
+    with pytest.raises(ValueError):
+        bert.train_bert_multiclass(
+            df, df, label_column="label_multi", run_dir=tmp_path, config=config,
+        )
+
+
+def test_bert_multiclass_runs_with_mocks(monkeypatch, synthetic_corpus, tmp_path):
+    df = synthetic_corpus.copy()
+    df["label_multi"] = ["mercado" if l == 1 else "outros" for l in df["label"]]
+    label_set = ("mercado", "outros")
+    _patch_multiclass_training(monkeypatch, label_set)
+
+    config = BertMulticlassConfig(label_set=label_set)
+    result = bert.train_bert_multiclass(
+        df, df, label_column="label_multi", run_dir=tmp_path, config=config,
+    )
+    assert result["label_set"] == list(label_set)
+    assert result["n_parameters"] == 110_000_000
+    assert "metrics" in result
+    assert "predictions" in result
+    preds = result["predictions"]
+    assert set(preds.columns) == {"index", "y_true", "y_pred", "method"}
+    assert all(p in label_set for p in preds["y_pred"].tolist())
+
+
+def test_bert_multiclass_rejects_unknown_labels(monkeypatch, synthetic_corpus, tmp_path):
+    import pytest
+    df = synthetic_corpus.copy()
+    df["label_multi"] = ["bogus_class"] * len(df)
+    label_set = ("mercado", "outros")
+    _patch_multiclass_training(monkeypatch, label_set)
+    config = BertMulticlassConfig(label_set=label_set)
+    with pytest.raises(ValueError):
+        bert.train_bert_multiclass(
+            df, df, label_column="label_multi", run_dir=tmp_path, config=config,
+        )

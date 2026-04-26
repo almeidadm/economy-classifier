@@ -11,7 +11,6 @@ from economy_classifier.datasets import (
 )
 from economy_classifier.ensemble import majority_vote, weighted_vote
 from economy_classifier.evaluation import compute_binary_metrics
-from economy_classifier.heuristics import build_default_catalog, score_text
 from economy_classifier.project import build_run_metadata, persist_run_artifacts
 from economy_classifier.tfidf import TfidfTrainingConfig, train_tfidf_classifier
 
@@ -42,20 +41,6 @@ def test_full_tfidf_pipeline_synthetic(synthetic_corpus, tmp_path):
     assert (tmp_path / "run_metadata.json").exists()
     assert (tmp_path / "predictions.csv").exists()
     assert (tmp_path / "metrics.json").exists()
-
-
-@pytest.mark.integration
-def test_heuristic_on_synthetic_corpus(synthetic_corpus):
-    """corpus -> split -> score_text on test -> compute_binary_metrics."""
-    _, _, test = build_train_val_test_split(synthetic_corpus, seed=42)
-    catalog = build_default_catalog()
-
-    results = [score_text(text, catalog) for text in test["text"]]
-    y_pred = pd.Series([1 if r["classification"] == "mercado" else 0 for r in results])
-    y_true = test["label"].reset_index(drop=True)
-
-    metrics = compute_binary_metrics(y_true, y_pred)
-    assert "f1" in metrics
 
 
 @pytest.mark.integration

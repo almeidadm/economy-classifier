@@ -7,7 +7,7 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Synthetic corpus — 200 rows (25 mercado, 175 outros)
-# Texts are realistic enough for heuristic scoring to work.
+# Texts are realistic enough for downstream classifier evaluation.
 # ---------------------------------------------------------------------------
 
 _MERCADO_TEXTS = [
@@ -267,8 +267,8 @@ def multi_method_predictions():
 
     methods = [
         "logreg", "linearsvc", "nb",
-        "bertimbau", "finbert", "finbert_ptbr",
-        "heuristic_strict",
+        "bertimbau", "finbert_ptbr", "deb3rta_base",
+        "ensemble_majority",
     ]
 
     rows = []
