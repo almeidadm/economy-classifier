@@ -9,9 +9,13 @@ import pandas as pd
 import pytest
 
 from economy_classifier.llm_review import (
+    LLM_REGISTRY,
     build_review_prompt,
+    classify_batch_hf,
     classify_single,
+    classify_single_hf,
     compute_review_concordance,
+    hf_results_to_predictions,
     parse_llm_response,
 )
 
@@ -151,3 +155,179 @@ def test_compute_review_concordance_ignores_errors():
     assert result["erros_parsing"] == 1
     assert result["concordant"] == 1
     assert result["mercado_to_outros"] == 1
+
+
+# --- HF backend ---
+
+
+def test_llm_registry_contains_recommended_models():
+    assert "qwen2.5-7b-instruct" in LLM_REGISTRY
+    assert "llama-3.1-8b-instruct" in LLM_REGISTRY
+    assert LLM_REGISTRY["qwen2.5-7b-instruct"].startswith("Qwen/")
+    assert LLM_REGISTRY["llama-3.1-8b-instruct"].startswith("meta-llama/")
+
+
+def _fake_tokenizer_and_model(generated_strings: list[str]):
+    """Mocks that simulate the tokenizer.apply_chat_template + model.generate flow.
+
+    `generated_strings` is a queue of decoded outputs across ALL batches;
+    the mock pops from it sequentially as ``tokenizer.decode`` is called.
+    The mock tracks per-call batch size so ``model.generate`` returns the
+    right number of outputs per batch.
+    """
+    last_batch_size = {"n": 0}
+
+    tokenizer = MagicMock()
+    tokenizer.pad_token = "<pad>"
+    tokenizer.pad_token_id = 0
+    tokenizer.eos_token_id = 1
+    tokenizer.padding_side = "right"
+    tokenizer.apply_chat_template = MagicMock(
+        side_effect=lambda msgs, **kw: f"PROMPT::{msgs[-1]['content']}",
+    )
+
+    def fake_tokenize(prompts, **kw):
+        last_batch_size["n"] = len(prompts)
+        encoded = MagicMock()
+        encoded.input_ids = MagicMock()
+        encoded.input_ids.shape = (len(prompts), 5)  # batch x seq_len=5
+        encoded.to = MagicMock(return_value=encoded)
+        # __iter__ over the encoded mapping needed by `**inputs` unpacking
+        encoded.keys = MagicMock(return_value=["input_ids", "attention_mask"])
+        encoded.__iter__ = MagicMock(return_value=iter(["input_ids", "attention_mask"]))
+        encoded.__getitem__ = MagicMock(side_effect=lambda k: MagicMock())
+        return encoded
+    tokenizer.side_effect = fake_tokenize
+
+    decode_iter = iter(generated_strings)
+    tokenizer.decode = MagicMock(side_effect=lambda ids, **kw: next(decode_iter))
+
+    model = MagicMock()
+    model.device = "cpu"
+
+    def fake_generate(**kwargs):
+        # Return an iterable of length matching the most recent tokenize() call,
+        # so _hf_generate's `for output_ids in outputs` loop yields exactly the
+        # right number of items.
+        return [MagicMock() for _ in range(last_batch_size["n"])]
+    model.generate = MagicMock(side_effect=fake_generate)
+
+    return tokenizer, model
+
+
+def test_classify_single_hf_parses_valid_response():
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "mercado", "justificativa": "Bolsa subiu."}',
+    ])
+    result = classify_single_hf(tokenizer, model, "Texto sobre bolsa")
+    assert result["label"] == "mercado"
+    assert "raw_response" in result
+    tokenizer.apply_chat_template.assert_called_once()
+    model.generate.assert_called_once()
+
+
+def test_classify_single_hf_handles_unparseable_response():
+    tokenizer, model = _fake_tokenizer_and_model(["nao sei classificar"])
+    result = classify_single_hf(tokenizer, model, "texto")
+    assert result["label"] == "erro"
+
+
+def test_classify_batch_hf_propagates_method_and_record_ids():
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "mercado", "justificativa": "X"}',
+        '{"label": "outros", "justificativa": "Y"}',
+    ])
+    results = classify_batch_hf(
+        tokenizer, model,
+        texts=["t1", "t2"],
+        record_ids=[101, 202],
+        method="qwen2.5-7b-instruct",
+        batch_size=2,
+    )
+    assert len(results) == 2
+    assert results[0]["record_id"] == 101
+    assert results[0]["method"] == "qwen2.5-7b-instruct"
+    assert results[0]["label"] == "mercado"
+    assert results[1]["record_id"] == 202
+    assert results[1]["label"] == "outros"
+
+
+def test_classify_batch_hf_validates_length_mismatch():
+    tokenizer, model = _fake_tokenizer_and_model([])
+    with pytest.raises(ValueError, match="length mismatch"):
+        classify_batch_hf(
+            tokenizer, model,
+            texts=["a", "b"],
+            record_ids=[1],
+            method="qwen2.5-7b-instruct",
+        )
+
+
+def test_classify_batch_hf_writes_checkpoint(tmp_path):
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "mercado", "justificativa": "x"}',
+        '{"label": "outros", "justificativa": "y"}',
+        '{"label": "mercado", "justificativa": "z"}',
+    ])
+    cp = tmp_path / "checkpoint.csv"
+    classify_batch_hf(
+        tokenizer, model,
+        texts=["a", "b", "c"], record_ids=[1, 2, 3],
+        method="qwen2.5-7b-instruct",
+        batch_size=1,
+        checkpoint_path=cp,
+        checkpoint_every=1,
+    )
+    assert cp.exists()
+    saved = pd.read_csv(cp)
+    assert len(saved) == 3
+    assert set(saved["record_id"]) == {1, 2, 3}
+
+
+def test_classify_batch_hf_recovers_from_batch_error(monkeypatch):
+    """If model.generate raises, the batch is recorded as errors and the loop continues."""
+    tokenizer, model = _fake_tokenizer_and_model([
+        '{"label": "mercado", "justificativa": "X"}',
+    ])
+    call_count = {"n": 0}
+    original_generate = model.generate
+
+    def flaky_generate(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated CUDA OOM")
+        return original_generate(**kwargs)
+    model.generate = MagicMock(side_effect=flaky_generate)
+
+    results = classify_batch_hf(
+        tokenizer, model,
+        texts=["bad", "good"],
+        record_ids=[1, 2],
+        method="qwen2.5-7b-instruct",
+        batch_size=1,
+    )
+    assert len(results) == 2
+    assert results[0]["label"] == "erro"
+    assert results[1]["label"] == "mercado"
+
+
+def test_hf_results_to_predictions_drops_errors_and_maps_labels():
+    results = [
+        {"label": "mercado", "justificativa": "A", "record_id": 1, "method": "qwen2.5-7b-instruct"},
+        {"label": "outros",  "justificativa": "B", "record_id": 2, "method": "qwen2.5-7b-instruct"},
+        {"label": "erro",    "justificativa": "C", "record_id": 3, "method": "qwen2.5-7b-instruct"},
+    ]
+    preds = hf_results_to_predictions(results)
+    assert len(preds) == 2  # error row dropped
+    assert list(preds.columns) >= ["index", "y_pred", "y_score", "method", "label"]
+    row_mercado = preds.iloc[0]
+    assert row_mercado["y_pred"] == 1
+    assert row_mercado["y_score"] == 1.0
+    row_outros = preds.iloc[1]
+    assert row_outros["y_pred"] == 0
+    assert row_outros["y_score"] == 0.0
+
+
+def test_hf_results_to_predictions_empty_input():
+    preds = hf_results_to_predictions([])
+    assert len(preds) == 0
