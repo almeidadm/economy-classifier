@@ -99,14 +99,17 @@ def build_tfidf_search_space(
             f"strategy must be one of {sorted(VALID_STRATEGIES)}, got {strategy!r}"
         )
 
-    # max_features=None is intentionally excluded: with ngram_range=(1,3) and
-    # 120k docs (4/5 of the train+val pool) the unbounded vocabulary balloons
-    # past several million n-grams, and the per-worker count_vocab dict can hit
-    # 4+ GB — enough to OOM-kill workers even on a Colab L4 (53 GB) when running
-    # 5-fold CV with 2 jobs in parallel. Cap at 200k.
-    # min_df=1 is excluded for the same reason (no pruning of hapax n-grams).
+    # Memory-conscious search space (target: stable on Colab L4, 53 GB):
+    # - max_features=None excluded: unbounded vocab balloons past millions of n-grams
+    # - min_df=1 excluded: hapax n-grams aren't pruned, vocab dict explodes
+    # - ngram_range=(1,3) excluded: with 150k PT-BR articles, sklearn's
+    #   _count_vocab materializes the full trigram dict (~30-100M unique strings,
+    #   ~3-10 GB of peak memory PER WORKER) before max_features can prune. Two
+    #   parallel workers easily exceed L4 RAM. Trigrams rarely improve F1 on
+    #   long news articles; (1,2) is the practical ceiling here. Re-add (1,3)
+    #   only on machines with >64 GB and n_jobs=1.
     space: dict = {
-        "tfidf__ngram_range": [(1, 1), (1, 2), (1, 3)],
+        "tfidf__ngram_range": [(1, 1), (1, 2)],
         "tfidf__min_df": [2, 5, 10, 20],
         "tfidf__max_df": [0.85, 0.9, 0.95, 1.0],
         "tfidf__max_features": [50_000, 100_000, 200_000],
