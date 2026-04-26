@@ -12,7 +12,9 @@ from economy_classifier.llm_review import (
     LLM_REGISTRY,
     VALID_BINARY_LABELS,
     VALID_MULTI_LABELS,
+    build_few_shot_examples,
     build_review_prompt,
+    build_review_prompt_few_shot,
     build_review_prompt_multiclass,
     classify_batch_hf,
     classify_single,
@@ -46,40 +48,57 @@ def test_build_review_prompt_preserves_text():
 # --- parse_llm_response ---
 
 
-def test_parse_llm_response_pure_json():
-    raw = '{"label": "mercado", "justificativa": "Tema de mercado financeiro."}'
-    result = parse_llm_response(raw)
-    assert result["label"] == "mercado"
-    assert "financeiro" in result["justificativa"]
+def test_parse_llm_response_bare_label():
+    """Primary format: prompts now ask for a single bare word."""
+    assert parse_llm_response("mercado")["label"] == "mercado"
+    assert parse_llm_response("outros")["label"] == "outros"
+    assert parse_llm_response("MERCADO")["label"] == "mercado"  # case-insensitive
+
+
+def test_parse_llm_response_bare_label_with_punctuation():
+    assert parse_llm_response('"mercado"')["label"] == "mercado"
+    assert parse_llm_response("mercado.")["label"] == "mercado"
+    assert parse_llm_response(" mercado ")["label"] == "mercado"
+    assert parse_llm_response("'outros'")["label"] == "outros"
+
+
+def test_parse_llm_response_pure_json_still_supported():
+    """Backward compat: JSON-wrapped responses still parse (for legacy Sabia outputs)."""
+    raw = '{"label": "mercado"}'
+    assert parse_llm_response(raw)["label"] == "mercado"
+
+
+def test_parse_llm_response_json_without_justificativa_now_valid():
+    """Justificativa is no longer required in the response."""
+    raw = '{"label": "mercado"}'
+    assert parse_llm_response(raw)["label"] == "mercado"
+
+
+def test_parse_llm_response_json_with_extra_fields():
+    raw = '{"label": "outros", "confidence": 0.92, "explanation": "x"}'
+    assert parse_llm_response(raw)["label"] == "outros"
 
 
 def test_parse_llm_response_markdown_fenced():
-    raw = '```json\n{"label": "outros", "justificativa": "Politica publica."}\n```'
-    result = parse_llm_response(raw)
-    assert result["label"] == "outros"
+    raw = '```json\n{"label": "outros"}\n```'
+    assert parse_llm_response(raw)["label"] == "outros"
 
 
-def test_parse_llm_response_with_surrounding_text():
-    raw = 'Aqui está a classificação: {"label": "mercado", "justificativa": "Bolsa."} Fim.'
-    result = parse_llm_response(raw)
-    assert result["label"] == "mercado"
+def test_parse_llm_response_label_in_sentence():
+    """Last-resort: label found as a whole word inside a sentence."""
+    assert parse_llm_response("A categoria correta e mercado.")["label"] == "mercado"
 
 
 def test_parse_llm_response_invalid():
-    result = parse_llm_response("Isso nao e JSON nenhum")
-    assert result["label"] == "erro"
+    assert parse_llm_response("Isso nao e nada nem mesmo um label")["label"] == "erro"
+    assert parse_llm_response("")["label"] == "erro"
 
 
 def test_parse_llm_response_wrong_label():
-    raw = '{"label": "economia", "justificativa": "Tema economico."}'
-    result = parse_llm_response(raw)
-    assert result["label"] == "erro"
-
-
-def test_parse_llm_response_missing_justificativa():
-    raw = '{"label": "mercado"}'
-    result = parse_llm_response(raw)
-    assert result["label"] == "erro"
+    raw = "economia"
+    assert parse_llm_response(raw)["label"] == "erro"
+    raw_json = '{"label": "economia"}'
+    assert parse_llm_response(raw_json)["label"] == "erro"
 
 
 # --- classify_single ---
@@ -89,9 +108,8 @@ def test_classify_single_success():
     mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = json.dumps(
-        {"label": "mercado", "justificativa": "Bolsa de valores."}
-    )
+    # New format: bare label
+    mock_response.choices[0].message.content = "mercado"
     mock_client.chat.completions.create.return_value = mock_response
 
     result = classify_single(mock_client, "Bolsa sobe 2%")
@@ -361,30 +379,37 @@ def test_build_review_prompt_multiclass_structure():
     assert messages[1]["content"] == "Lula assina decreto sobre Petrobras"
 
 
-def test_parse_llm_response_multiclass_accepts_top7_labels():
+def test_parse_llm_response_multiclass_accepts_top7_labels_bare():
+    """Multiclass parser accepts bare labels (new format)."""
     for label in VALID_MULTI_LABELS:
-        raw = f'{{"label": "{label}", "justificativa": "x"}}'
+        result = parse_llm_response_multiclass(label)
+        assert result["label"] == label, f"failed for bare label {label!r}"
+
+
+def test_parse_llm_response_multiclass_accepts_top7_labels_json():
+    """Backward compat: also accepts JSON-wrapped (no justificativa needed)."""
+    for label in VALID_MULTI_LABELS:
+        raw = f'{{"label": "{label}"}}'
         result = parse_llm_response_multiclass(raw)
-        assert result["label"] == label, f"failed for label {label}"
+        assert result["label"] == label, f"failed for JSON label {label!r}"
 
 
 def test_parse_llm_response_multiclass_rejects_binary_only_labels():
-    # "mercado" is valid in BOTH (overlap), but a label like "esportes" (with s)
-    # should be rejected because it's not in VALID_MULTI_LABELS exactly.
-    raw = '{"label": "esportes", "justificativa": "Futebol."}'
+    # "esportes" (with trailing s) should be rejected — not in VALID_MULTI_LABELS exactly.
+    raw = "esportes"
     result = parse_llm_response_multiclass(raw)
     assert result["label"] == "erro"
 
 
 def test_parse_llm_response_multiclass_rejects_arbitrary_labels():
-    raw = '{"label": "tecnologia", "justificativa": "IA."}'
+    raw = "tecnologia"
     result = parse_llm_response_multiclass(raw)
     assert result["label"] == "erro"
 
 
 def test_parse_llm_response_with_explicit_valid_labels():
     """The base parse_llm_response respects a custom valid_labels argument."""
-    raw = '{"label": "esporte", "justificativa": "x"}'
+    raw = "esporte"
     binary = parse_llm_response(raw)  # default: binary labels
     multi = parse_llm_response(raw, valid_labels=VALID_MULTI_LABELS)
     assert binary["label"] == "erro"
@@ -438,3 +463,113 @@ def test_hf_results_to_multiclass_predictions_drops_invalid():
 def test_hf_results_to_multiclass_predictions_empty():
     preds = hf_results_to_multiclass_predictions([])
     assert len(preds) == 0
+
+
+# --- Few-shot ---
+
+
+def test_build_few_shot_examples_binary_balanced():
+    df = pd.DataFrame({
+        "text": [f"texto {i}" for i in range(20)],
+        "label": [1] * 10 + [0] * 10,
+    })
+    exs = build_few_shot_examples(df, n_per_class=2, seed=0)
+    # 2 per class x 2 classes = 4 examples
+    assert len(exs) == 4
+    labels = [lbl for _, lbl in exs]
+    assert labels.count("mercado") == 2
+    assert labels.count("outros") == 2
+
+
+def test_build_few_shot_examples_multiclass_one_per_class():
+    df = pd.DataFrame({
+        "text": [f"texto {i}" for i in range(40)],
+        "label_multi": ["poder"] * 5 + ["colunas"] * 5 + ["mercado"] * 5
+                       + ["esporte"] * 5 + ["mundo"] * 5 + ["cotidiano"] * 5
+                       + ["ilustrada"] * 5 + ["outros"] * 5,
+    })
+    exs = build_few_shot_examples(
+        df,
+        label_column="label_multi",
+        valid_labels=VALID_MULTI_LABELS,
+        n_per_class=1,
+        seed=0,
+    )
+    assert len(exs) == 8
+    labels = [lbl for _, lbl in exs]
+    assert set(labels) == set(VALID_MULTI_LABELS)
+
+
+def test_build_few_shot_examples_truncates_long_texts():
+    long_text = "a" * 5000
+    df = pd.DataFrame({"text": [long_text] * 10, "label": [0, 1] * 5})
+    exs = build_few_shot_examples(df, n_per_class=1, text_max_chars=200, seed=0)
+    for text, _ in exs:
+        assert len(text) <= 200
+
+
+def test_build_few_shot_examples_deterministic_with_seed():
+    df = pd.DataFrame({
+        "text": [f"texto {i}" for i in range(20)],
+        "label": [1] * 10 + [0] * 10,
+    })
+    exs1 = build_few_shot_examples(df, n_per_class=2, seed=42)
+    exs2 = build_few_shot_examples(df, n_per_class=2, seed=42)
+    assert exs1 == exs2
+
+
+def test_build_few_shot_examples_skips_missing_class():
+    """If a class has zero rows, just skip it (don't fail)."""
+    df = pd.DataFrame({
+        "text": ["t1", "t2", "t3"],
+        "label_multi": ["poder", "poder", "esporte"],
+    })
+    exs = build_few_shot_examples(
+        df, label_column="label_multi", valid_labels=VALID_MULTI_LABELS,
+        n_per_class=1, seed=0,
+    )
+    # Only "poder" and "esporte" exist; expect 2 examples
+    assert len(exs) == 2
+    assert {lbl for _, lbl in exs} == {"poder", "esporte"}
+
+
+def test_build_review_prompt_few_shot_binary_message_structure():
+    examples = [("texto sobre bolsa", "mercado"), ("texto sobre futebol", "outros")]
+    msgs = build_review_prompt_few_shot("texto novo", examples=examples)
+    # system + 2*(user, assistant) pairs + final user = 6 messages
+    assert len(msgs) == 6
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[1]["content"] == "texto sobre bolsa"
+    assert msgs[2]["role"] == "assistant"
+    assert msgs[2]["content"] == "mercado"
+    assert msgs[3]["role"] == "user"
+    assert msgs[4]["role"] == "assistant"
+    assert msgs[5]["role"] == "user"
+    assert msgs[5]["content"] == "texto novo"
+
+
+def test_build_review_prompt_few_shot_multiclass_uses_multi_system():
+    examples = [("texto X", "esporte")]
+    msgs_bin = build_review_prompt_few_shot("q", examples=examples, multiclass=False)
+    msgs_multi = build_review_prompt_few_shot("q", examples=examples, multiclass=True)
+    assert "binario" in msgs_bin[0]["content"].lower()
+    assert "8 categorias" in msgs_multi[0]["content"]
+
+
+def test_classify_single_hf_with_few_shot_prompt():
+    """End-to-end: pass a few-shot prompt builder via prompt_builder param."""
+    from functools import partial
+    examples = [("texto bolsa", "mercado"), ("texto gol", "outros")]
+    builder = partial(build_review_prompt_few_shot, examples=examples)
+
+    tokenizer, model = _fake_tokenizer_and_model(["mercado"])
+    result = classify_single_hf(
+        tokenizer, model, "texto novo sobre Selic",
+        prompt_builder=builder,
+    )
+    assert result["label"] == "mercado"
+    # Verify the chat template received a multi-message conversation (5 entries)
+    call = tokenizer.apply_chat_template.call_args_list[0]
+    msgs_arg = call[0][0]
+    assert len(msgs_arg) == 6  # system + 2*(u,a) + final user

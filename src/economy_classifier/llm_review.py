@@ -34,8 +34,7 @@ Voce e um classificador binario de textos jornalisticos brasileiros.
 
 Sua tarefa: dado um trecho de texto, classifique-o segundo a sua tematica \
 central como "mercado" (texto de tematica economica em sentido amplo) ou \
-"outros" (qualquer outra tematica). O rotulo "mercado" e usado por convencao \
-da pipeline para denotar a classe positiva "economia".
+"outros" (qualquer outra tematica).
 
 - "mercado": o tema central do texto e economia em sentido amplo, abrangendo \
 mercado financeiro (bolsa, cambio, juros, bancos, commodities), atividade \
@@ -52,8 +51,8 @@ internacional sem foco economico, cotidiano.
 Em caso de duvida, considere o tema dominante do texto, nao mencoes \
 incidentais.
 
-Responda APENAS com um JSON no formato:
-{"label": "mercado" ou "outros", "justificativa": "<1 frase curta>"}"""
+Responda APENAS com uma unica palavra: "mercado" ou "outros". \
+Sem JSON, sem aspas, sem explicacao — apenas a palavra."""
 
 
 SYSTEM_PROMPT_MULTICLASS = """\
@@ -86,8 +85,8 @@ recorte de cotidiano).
 Em caso de duvida, escolha a categoria que melhor representa o tema dominante \
 — nao mencoes incidentais.
 
-Responda APENAS com um JSON no formato:
-{"label": "<uma das 8 categorias>", "justificativa": "<1 frase curta>"}"""
+Responda APENAS com uma unica palavra: uma das 8 categorias acima. \
+Sem JSON, sem aspas, sem explicacao — apenas a palavra."""
 
 
 VALID_BINARY_LABELS: tuple[str, ...] = ("mercado", "outros")
@@ -114,54 +113,62 @@ def build_review_prompt_multiclass(text: str) -> list[dict]:
 
 
 def parse_llm_response(raw: str, valid_labels: tuple[str, ...] = VALID_BINARY_LABELS) -> dict:
-    """Extract label and justification from a raw LLM response string.
+    """Extract a class label from a raw LLM response.
 
-    Handles pure JSON, markdown-fenced JSON, and extra surrounding text.
-    Validates that ``label`` is in *valid_labels* — any other value yields
-    ``label="erro"``. Default validates against the binary labels for backward
-    compatibility; pass ``VALID_MULTI_LABELS`` for the multiclass task.
+    Tries multiple formats in order (most-likely-first given our prompts ask for
+    a bare label):
 
-    Returns ``{"label": ..., "justificativa": ...}`` on success, or
-    ``{"label": "erro", "justificativa": "<reason>"}`` on failure.
+    1. Bare label as the entire response (after stripping quotes/punctuation).
+    2. JSON-wrapped (``{"label": "..."}``), with or without markdown fence —
+       still parsed for backward compatibility with older Sabia responses.
+    3. Any valid label found as a whole word anywhere in the response.
+
+    ``valid_labels`` defaults to the binary labels; pass ``VALID_MULTI_LABELS``
+    for the 8-class task.
+
+    Returns ``{"label": str}`` (lowercase, in ``valid_labels``) on success or
+    ``{"label": "erro"}`` if no valid label could be extracted.
     """
+    if not raw or not raw.strip():
+        return {"label": "erro"}
+
     text = raw.strip()
+    text_lower = text.lower()
+    valid_set = set(l.lower() for l in valid_labels)
 
-    def _check(parsed) -> bool:
-        return (
-            isinstance(parsed, dict)
-            and parsed.get("label") in valid_labels
-            and "justificativa" in parsed
-        )
+    # 1. Fast path: bare label (with or without surrounding punctuation/quotes)
+    cleaned = re.sub(r"^[\s\"'.\(\[{`]+|[\s\"'.,;:!?\)\]}`]+$", "", text_lower)
+    first_word = cleaned.split()[0] if cleaned.split() else cleaned
+    first_word = re.sub(r"[^\w]", "", first_word)
+    if first_word in valid_set:
+        return {"label": first_word}
 
-    # Try direct JSON parse
-    try:
-        parsed = json.loads(text)
-        if _check(parsed):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    # Try extracting from markdown fences
+    # 2. JSON parsing (direct, markdown-fenced, or first {...} block)
+    candidates = [text]
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence_match:
-        try:
-            parsed = json.loads(fence_match.group(1))
-            if _check(parsed):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    # Try finding first {...} block
+        candidates.insert(0, fence_match.group(1))
     brace_match = re.search(r"\{[^{}]*\}", text)
     if brace_match:
-        try:
-            parsed = json.loads(brace_match.group())
-            if _check(parsed):
-                return parsed
-        except json.JSONDecodeError:
-            pass
+        candidates.append(brace_match.group())
 
-    return {"label": "erro", "justificativa": f"Resposta nao parseavel: {text[:200]}"}
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            label = str(parsed.get("label", "")).strip().lower()
+            if label in valid_set:
+                return {"label": label}
+
+    # 3. Last resort: whole-word scan (handles "A categoria correta e mercado.")
+    pattern = r"\b(" + "|".join(re.escape(l) for l in valid_set) + r")\b"
+    match = re.search(pattern, text_lower)
+    if match:
+        return {"label": match.group(1)}
+
+    return {"label": "erro"}
 
 
 def parse_llm_response_multiclass(raw: str) -> dict:
@@ -174,8 +181,93 @@ def _valid_response(parsed: dict) -> bool:
     return (
         isinstance(parsed, dict)
         and parsed.get("label") in VALID_BINARY_LABELS
-        and "justificativa" in parsed
     )
+
+
+# ---------------------------------------------------------------------------
+# Few-shot helpers
+# ---------------------------------------------------------------------------
+
+
+def build_few_shot_examples(
+    df: "pd.DataFrame",
+    *,
+    label_column: str = "label",
+    text_column: str = "text",
+    valid_labels: tuple[str, ...] = VALID_BINARY_LABELS,
+    n_per_class: int = 2,
+    text_max_chars: int = 500,
+    seed: int = 42,
+) -> list[tuple[str, str]]:
+    """Sample ``n_per_class`` labeled examples from *df* for few-shot prompting.
+
+    For binary tasks: ``df[label_column]`` is int (0/1). For multiclass tasks:
+    ``df[label_column]`` is a string (one of *valid_labels*). The mapping
+    ``int -> string`` is fixed: 0 -> "outros", 1 -> "mercado".
+
+    Each text is truncated to ``text_max_chars`` (most Folha articles' lede
+    has the topic in the first paragraph; few-shot demos don't need full text).
+
+    Returns a shuffled list of ``(text, label_str)`` tuples ordered randomly so
+    classes are interleaved (avoids implicit "all class A then all class B"
+    bias in autoregressive models).
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    examples: list[tuple[str, str]] = []
+
+    label_dtype = df[label_column].dtype
+    is_int_label = label_dtype.kind in ("i", "u", "b")
+
+    for class_idx, class_str in enumerate(valid_labels):
+        if is_int_label:
+            # binary path
+            if class_str == "mercado":
+                subset = df[df[label_column] == 1]
+            elif class_str == "outros":
+                subset = df[df[label_column] == 0]
+            else:
+                continue  # unknown binary label, skip
+        else:
+            subset = df[df[label_column] == class_str]
+
+        if len(subset) == 0:
+            continue
+        n = min(n_per_class, len(subset))
+        picked = subset.sample(n=n, random_state=int(rng.integers(0, 10**9)))
+        for _, row in picked.iterrows():
+            text = (row[text_column] or "")[:text_max_chars]
+            examples.append((text, class_str))
+
+    # Shuffle so classes are interleaved
+    indices = list(range(len(examples)))
+    rng.shuffle(indices)
+    return [examples[i] for i in indices]
+
+
+def build_review_prompt_few_shot(
+    text: str,
+    *,
+    examples: list[tuple[str, str]],
+    multiclass: bool = False,
+) -> list[dict]:
+    """Build a few-shot chat messages array.
+
+    Structure: ``[system, ex1_user, ex1_assistant, ex2_user, ex2_assistant, ...,
+    target_user]`` — each example becomes a (user, assistant) pair where the
+    assistant message is the bare label (matching the format the prompt asks
+    the model to use).
+
+    ``multiclass=True`` uses ``SYSTEM_PROMPT_MULTICLASS``; otherwise ``SYSTEM_PROMPT``.
+    """
+    system = SYSTEM_PROMPT_MULTICLASS if multiclass else SYSTEM_PROMPT
+    messages: list[dict] = [{"role": "system", "content": system}]
+    for ex_text, ex_label in examples:
+        messages.append({"role": "user", "content": ex_text})
+        messages.append({"role": "assistant", "content": ex_label})
+    messages.append({"role": "user", "content": text})
+    return messages
 
 
 def classify_single(
