@@ -1,7 +1,8 @@
-# Dados e artefatos
+# Dados e artefatos — toda saida de experimento fica fora do git.
+# Predictions sao gigabytes, .pdf e relatorios sao reproduziveis dos notebooks.
+# Splits/runs/folds geram-se via notebook 01 + scripts/colab_unpack.py.
 data/
-artifacts/runs/
-artifacts/splits/
+artifacts/
 
 # Python
 *.pyc

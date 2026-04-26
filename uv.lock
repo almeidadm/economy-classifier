@@ -785,22 +785,22 @@ llm = [
 
 [package.metadata]
 requires-dist = [
-    { name = "accelerate", specifier = ">=1.13.0" },
-    { name = "datasets", specifier = ">=4.8.1" },
+    { name = "accelerate", specifier = ">=0.34" },
+    { name = "datasets", specifier = ">=2.20" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=7.2.0" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "numpy", specifier = ">=2.4.3" },
-    { name = "openai", specifier = ">=2.31.0" },
+    { name = "matplotlib", specifier = ">=3.7" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "openai", specifier = ">=1.50" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.0" },
-    { name = "pandas", specifier = ">=3.0.1" },
+    { name = "pandas", specifier = ">=2.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11" },
-    { name = "scikit-learn", specifier = ">=1.8.0" },
-    { name = "scipy", specifier = ">=1.15.0" },
-    { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "torch", specifier = ">=2.10.0" },
-    { name = "transformers", specifier = ">=5.3.0" },
+    { name = "scikit-learn", specifier = ">=1.4" },
+    { name = "scipy", specifier = ">=1.11" },
+    { name = "seaborn", specifier = ">=0.13" },
+    { name = "torch", specifier = ">=2.4" },
+    { name = "transformers", specifier = ">=4.45" },
 ]
 provides-extras = ["dev", "llm"]
 
