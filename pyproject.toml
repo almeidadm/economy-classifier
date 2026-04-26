@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "economy-classifier"
 version = "0.1.0"
 description = "Reproducible pipeline for economy-related text classification (mercado vs outros)."
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.13.0",
     "datasets>=4.8.1",
