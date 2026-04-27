@@ -185,9 +185,9 @@ def test_compute_review_concordance_ignores_errors():
 
 def test_llm_registry_contains_recommended_models():
     assert "qwen2.5-7b-instruct" in LLM_REGISTRY
-    assert "llama-3.1-8b-instruct" in LLM_REGISTRY
+    assert "mistral-7b-instruct-v0.3" in LLM_REGISTRY
     assert LLM_REGISTRY["qwen2.5-7b-instruct"].startswith("Qwen/")
-    assert LLM_REGISTRY["llama-3.1-8b-instruct"].startswith("meta-llama/")
+    assert LLM_REGISTRY["mistral-7b-instruct-v0.3"].startswith("mistralai/")
 
 
 def _fake_tokenizer_and_model(generated_strings: list[str]):
