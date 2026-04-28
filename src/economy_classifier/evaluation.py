@@ -102,11 +102,27 @@ def compute_mcnemar_test(
     y_true: np.ndarray,
     y_pred_a: np.ndarray,
     y_pred_b: np.ndarray,
-) -> dict[str, float | bool]:
+    *,
+    n_comparisons: int = 1,
+    alpha: float = 0.05,
+) -> dict[str, float | bool | int]:
     """McNemar test comparing two classifiers on the same data.
 
-    Returns dict with chi2, p_value, significant_at_005.
+    When ``n_comparisons > 1`` the returned ``p_value_adjusted`` applies
+    Bonferroni correction (``min(1.0, p * n_comparisons)``) to control the
+    family-wise error rate. Use the same ``n_comparisons`` value for every
+    pairwise call in a comparison family (e.g. for K models with K*(K-1)/2
+    pairs, pass that count to every call).
+
+    Returns:
+        chi2, p_value, p_value_adjusted, n_comparisons, alpha,
+        significant_at_005 (raw p < alpha — kept for backwards compatibility),
+        significant_after_correction (p_adjusted < alpha — the metric to use
+        when comparing more than two methods).
     """
+    if n_comparisons < 1:
+        raise ValueError(f"n_comparisons must be >= 1, got {n_comparisons}")
+
     y_true = np.asarray(y_true)
     y_pred_a = np.asarray(y_pred_a)
     y_pred_b = np.asarray(y_pred_b)
@@ -121,16 +137,74 @@ def compute_mcnemar_test(
     n_discordant = b_wrong_a_right + a_wrong_b_right
 
     if n_discordant == 0:
-        return {"chi2": 0.0, "p_value": 1.0, "significant_at_005": False}
+        chi2_stat = 0.0
+        p_value = 1.0
+    else:
+        chi2_stat = (b_wrong_a_right - a_wrong_b_right) ** 2 / n_discordant
+        p_value = float(1 - chi2_dist.cdf(chi2_stat, df=1))
 
-    chi2_stat = (b_wrong_a_right - a_wrong_b_right) ** 2 / n_discordant
-    p_value = float(1 - chi2_dist.cdf(chi2_stat, df=1))
+    p_adjusted = min(1.0, p_value * n_comparisons)
 
     return {
         "chi2": round(float(chi2_stat), 4),
         "p_value": round(p_value, 6),
+        "p_value_adjusted": round(p_adjusted, 6),
+        "n_comparisons": int(n_comparisons),
+        "alpha": float(alpha),
         "significant_at_005": p_value < 0.05,
+        "significant_after_correction": p_adjusted < alpha,
     }
+
+
+def compute_mcnemar_pairwise(
+    y_true: np.ndarray | pd.Series,
+    method_predictions: dict[str, np.ndarray | pd.Series],
+    *,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Run pairwise McNemar across every pair in *method_predictions*.
+
+    Applies Bonferroni correction with ``n_comparisons = K*(K-1)/2`` so the
+    family-wise error rate stays bounded by ``alpha``. The number of
+    comparisons is computed once from the input dict — callers do not need
+    to track it manually.
+
+    Returns a long-format DataFrame with one row per ordered pair (lex order)
+    and columns: ``method_a``, ``method_b``, ``chi2``, ``p_value``,
+    ``p_value_adjusted``, ``n_comparisons``, ``significant_at_005``,
+    ``significant_after_correction``.
+    """
+    methods = sorted(method_predictions.keys())
+    k = len(methods)
+    if k < 2:
+        return pd.DataFrame(columns=[
+            "method_a", "method_b", "chi2", "p_value", "p_value_adjusted",
+            "n_comparisons", "significant_at_005", "significant_after_correction",
+        ])
+
+    n_comparisons = k * (k - 1) // 2
+    rows = []
+    for i in range(k):
+        for j in range(i + 1, k):
+            a, b = methods[i], methods[j]
+            res = compute_mcnemar_test(
+                y_true,
+                method_predictions[a],
+                method_predictions[b],
+                n_comparisons=n_comparisons,
+                alpha=alpha,
+            )
+            rows.append({
+                "method_a": a,
+                "method_b": b,
+                "chi2": res["chi2"],
+                "p_value": res["p_value"],
+                "p_value_adjusted": res["p_value_adjusted"],
+                "n_comparisons": res["n_comparisons"],
+                "significant_at_005": res["significant_at_005"],
+                "significant_after_correction": res["significant_after_correction"],
+            })
+    return pd.DataFrame(rows)
 
 
 def compute_multiclass_metrics(

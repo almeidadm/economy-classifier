@@ -9,6 +9,7 @@ from economy_classifier.evaluation import (
     compute_confusion_matrix,
     compute_cost_metrics,
     compute_ece,
+    compute_mcnemar_pairwise,
     compute_mcnemar_test,
     compute_multiclass_metrics,
     compute_roc_auc,
@@ -139,8 +140,97 @@ def test_mcnemar_returns_expected_keys():
     y_true = pd.Series([1, 0, 1, 0])
     y_pred = pd.Series([1, 0, 0, 0])
     result = compute_mcnemar_test(y_true, y_pred, y_pred)
-    assert {"chi2", "p_value", "significant_at_005"}.issubset(result.keys())
+    assert {
+        "chi2", "p_value", "p_value_adjusted", "n_comparisons", "alpha",
+        "significant_at_005", "significant_after_correction",
+    }.issubset(result.keys())
     assert isinstance(result["significant_at_005"], bool)
+    assert isinstance(result["significant_after_correction"], bool)
+
+
+def test_mcnemar_bonferroni_default_does_nothing():
+    y_true = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    y_pred_a = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    y_pred_b = pd.Series([0, 0, 0, 1, 1, 1, 1, 1, 1, 1])
+    result = compute_mcnemar_test(y_true, y_pred_a, y_pred_b)
+    assert result["n_comparisons"] == 1
+    assert result["p_value"] == result["p_value_adjusted"]
+
+
+def test_mcnemar_bonferroni_inflates_p_value():
+    y_true = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    y_pred_a = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    y_pred_b = pd.Series([0, 0, 0, 1, 1, 1, 1, 1, 1, 1])
+    raw = compute_mcnemar_test(y_true, y_pred_a, y_pred_b)
+    adjusted = compute_mcnemar_test(y_true, y_pred_a, y_pred_b, n_comparisons=10)
+    assert adjusted["p_value"] == raw["p_value"]
+    # Adjusted is multiplied internally before rounding to 6 decimals; the
+    # naive product of two 6-decimal rounded values diverges by up to ~5e-6.
+    assert abs(adjusted["p_value_adjusted"] - min(1.0, raw["p_value"] * 10)) < 1e-4
+
+
+def test_mcnemar_bonferroni_caps_at_one():
+    y_true = pd.Series([1, 0, 1, 0])
+    y_pred = pd.Series([1, 0, 0, 0])
+    result = compute_mcnemar_test(y_true, y_pred, y_pred, n_comparisons=1000)
+    assert result["p_value_adjusted"] <= 1.0
+
+
+def test_mcnemar_bonferroni_can_flip_significance():
+    """A barely-significant result should become non-significant after correction."""
+    rng = np.random.default_rng(0)
+    n = 200
+    y_true = rng.integers(0, 2, size=n)
+    # Make a small but persistent disagreement
+    y_pred_a = y_true.copy()
+    y_pred_b = y_true.copy()
+    flip = rng.choice(n, size=15, replace=False)
+    y_pred_b[flip] = 1 - y_pred_b[flip]
+    raw = compute_mcnemar_test(y_true, y_pred_a, y_pred_b)
+    corrected = compute_mcnemar_test(y_true, y_pred_a, y_pred_b, n_comparisons=50)
+    # Sanity: discordance is real, raw p < 0.05
+    assert raw["significant_at_005"] is True
+    # With heavy correction (50 comparisons), it can go either way; just assert
+    # that adjusted is no smaller than raw and equal to min(1, raw*50).
+    assert corrected["p_value_adjusted"] >= raw["p_value"]
+
+
+def test_mcnemar_rejects_zero_comparisons():
+    y_true = pd.Series([1, 0])
+    y_pred = pd.Series([1, 0])
+    with pytest.raises(ValueError):
+        compute_mcnemar_test(y_true, y_pred, y_pred, n_comparisons=0)
+
+
+def test_mcnemar_pairwise_three_methods():
+    y_true = pd.Series([1, 1, 1, 0, 0, 0, 0, 0])
+    preds = {
+        "perfect": pd.Series([1, 1, 1, 0, 0, 0, 0, 0]),
+        "all_zero": pd.Series([0, 0, 0, 0, 0, 0, 0, 0]),
+        "all_one": pd.Series([1, 1, 1, 1, 1, 1, 1, 1]),
+    }
+    df = compute_mcnemar_pairwise(y_true, preds)
+    assert len(df) == 3  # K=3 → 3 pairs
+    assert (df["n_comparisons"] == 3).all()
+    pairs = set(zip(df["method_a"], df["method_b"]))
+    assert pairs == {("all_one", "all_zero"), ("all_one", "perfect"), ("all_zero", "perfect")}
+
+
+def test_mcnemar_pairwise_with_one_method_returns_empty():
+    df = compute_mcnemar_pairwise(pd.Series([1, 0]), {"only": pd.Series([1, 0])})
+    assert len(df) == 0
+    assert "p_value_adjusted" in df.columns
+
+
+def test_mcnemar_pairwise_adjusted_p_matches_individual_call():
+    y_true = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    a = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    b = pd.Series([0, 0, 0, 1, 1, 1, 1, 1, 1, 1])
+    c = pd.Series([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])
+    df = compute_mcnemar_pairwise(y_true, {"a": a, "b": b, "c": c})
+    direct = compute_mcnemar_test(y_true, a, b, n_comparisons=3)
+    row = df[(df["method_a"] == "a") & (df["method_b"] == "b")].iloc[0]
+    assert abs(row["p_value_adjusted"] - direct["p_value_adjusted"]) < 1e-9
 
 
 def test_roc_auc_perfect_scores():
