@@ -50,14 +50,48 @@ def weighted_vote(
     })
 
 
+def _stack_features(
+    features_per_model: dict[str, pd.Series | pd.DataFrame],
+) -> pd.DataFrame:
+    """Concatenate per-model features into a single named DataFrame.
+
+    Each model contributes one column when given a Series (binary case,
+    ``y_score``) or ``n_classes`` columns when given a DataFrame
+    (multiclass case, one column per ``y_proba_<class>``). Column names
+    are ``<model>`` for Series inputs and ``<model>__<class>`` for
+    DataFrame inputs, so the meta-classifier's ``feature_names_in_``
+    stays aligned across fit and predict calls.
+    """
+    parts: list[pd.DataFrame] = []
+    for name, feats in features_per_model.items():
+        if isinstance(feats, pd.Series):
+            parts.append(feats.to_frame(name=name).reset_index(drop=True))
+        elif isinstance(feats, pd.DataFrame):
+            renamed = feats.rename(columns=lambda c: f"{name}__{c}")
+            parts.append(renamed.reset_index(drop=True))
+        else:
+            raise TypeError(
+                f"features for {name!r} must be Series or DataFrame, got {type(feats).__name__}"
+            )
+    return pd.concat(parts, axis=1)
+
+
 def train_stacking_classifier(
-    val_scores: dict[str, pd.Series],
+    val_features: dict[str, pd.Series | pd.DataFrame],
     val_true: pd.Series,
     *,
     seed: int = 42,
 ) -> LogisticRegression:
-    """Train a meta-classifier on validation-set scores (no leakage)."""
-    X = pd.DataFrame(val_scores).values
+    """Train a meta-classifier on validation-set features (no leakage).
+
+    ``val_features`` accepts either:
+
+    - ``dict[model -> Series]`` for binary stacking (one ``y_score`` per model)
+    - ``dict[model -> DataFrame]`` for multiclass stacking (one column per
+      class, in a fixed order). All DataFrames must share the same columns
+      so the meta features stay aligned.
+    """
+    X = _stack_features(val_features)
     y = np.asarray(val_true)
     clf = LogisticRegression(random_state=seed, solver="lbfgs", max_iter=1000)
     clf.fit(X, y)
@@ -66,16 +100,27 @@ def train_stacking_classifier(
 
 def predict_stacking(
     model: LogisticRegression,
-    test_scores: dict[str, pd.Series],
+    test_features: dict[str, pd.Series | pd.DataFrame],
 ) -> pd.DataFrame:
-    """Predict using the stacking meta-classifier."""
-    X = pd.DataFrame(test_scores).values
+    """Predict using the stacking meta-classifier.
+
+    Binary input returns ``y_pred`` + ``y_score``. Multiclass input returns
+    ``y_pred`` + one ``y_proba_<class>`` column per learned class.
+    """
+    X = _stack_features(test_features)
     y_pred = model.predict(X)
-    y_score = model.predict_proba(X)[:, 1]
-    return pd.DataFrame({
-        "y_pred": y_pred.tolist(),
-        "y_score": np.round(y_score, 4).tolist(),
-    })
+    proba = model.predict_proba(X)
+
+    if proba.shape[1] == 2:
+        return pd.DataFrame({
+            "y_pred": y_pred.tolist(),
+            "y_score": np.round(proba[:, 1], 4).tolist(),
+        })
+
+    out = pd.DataFrame({"y_pred": y_pred.tolist()})
+    for j, cls in enumerate(model.classes_):
+        out[f"y_proba_{cls}"] = np.round(proba[:, j], 4)
+    return out
 
 
 def save_stacking_classifier(
@@ -84,18 +129,34 @@ def save_stacking_classifier(
     *,
     feature_names: list[str] | None = None,
 ) -> None:
-    """Persist a stacking meta-classifier and its metadata."""
+    """Persist a stacking meta-classifier and its metadata.
+
+    For binary meta (1D ``coef_``) the metadata records a single coefficient
+    vector and intercept. For multiclass meta (2D ``coef_``) the metadata
+    records per-class coefficients and intercepts, plus the class order.
+    """
     import joblib
 
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, path / "meta_classifier.joblib")
 
-    meta = {
-        "coefficients": model.coef_[0].tolist(),
-        "intercept": float(model.intercept_[0]),
+    coef = np.asarray(model.coef_)
+    intercept = np.asarray(model.intercept_)
+
+    meta: dict = {
         "n_features": int(model.n_features_in_),
+        "classes": model.classes_.tolist(),
     }
+    if coef.shape[0] == 1:
+        meta["coefficients"] = coef[0].tolist()
+        meta["intercept"] = float(intercept[0])
+    else:
+        meta["coefficients_per_class"] = coef.tolist()
+        meta["intercepts"] = intercept.tolist()
+
+    if feature_names is None and getattr(model, "feature_names_in_", None) is not None:
+        feature_names = list(model.feature_names_in_)
     if feature_names:
         meta["feature_names"] = feature_names
     (path / "meta_classifier_meta.json").write_text(
@@ -132,19 +193,27 @@ def compute_agreement_matrix(
 
 def compute_fleiss_kappa(
     predictions: dict[str, pd.Series],
+    *,
+    categories: list | None = None,
 ) -> float:
-    """Fleiss' Kappa for multiple raters with binary categories.
+    """Fleiss' Kappa for multiple raters across k categories.
 
-    Each rater assigns category 0 or 1 to each subject. Returns a single
-    kappa value measuring agreement beyond chance.
+    Each rater (key in ``predictions``) assigns a category to each subject.
+    Categories may be integers (e.g. binary 0/1) or strings (e.g. multiclass
+    labels). When ``categories`` is omitted it is inferred from the union
+    of observed values, so empty categories that exist in the schema but
+    not in the data are ignored — pass ``categories`` explicitly to keep
+    the schema fixed across runs.
     """
     votes = pd.DataFrame(predictions)
     n_subjects, n_raters = votes.shape
 
-    # Build N x 2 matrix: counts of raters assigning each category per subject
+    if categories is None:
+        categories = sorted(pd.unique(votes.values.ravel()).tolist())
+
+    # N x k matrix: counts of raters assigning each category per subject
     counts = np.column_stack([
-        (votes == 0).sum(axis=1).values,
-        (votes == 1).sum(axis=1).values,
+        (votes == cat).sum(axis=1).values for cat in categories
     ])
 
     # P_i: proportion of agreeing pairs per subject

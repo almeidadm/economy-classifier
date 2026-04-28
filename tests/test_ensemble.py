@@ -129,6 +129,91 @@ def test_stacking_no_data_leakage():
     assert model.n_features_in_ == 3
 
 
+def _make_proba_df(rng, n: int, classes: list[str]) -> pd.DataFrame:
+    raw = rng.dirichlet(np.ones(len(classes)), size=n)
+    return pd.DataFrame(raw, columns=classes)
+
+
+def test_stacking_multiclass_features_per_class():
+    """Multiclass stacking concatenates per-class proba columns from each model."""
+    rng = np.random.RandomState(0)
+    classes = ["a", "b", "c"]
+    val_features = {f"m{i}": _make_proba_df(rng, 60, classes) for i in range(4)}
+    val_true = pd.Series((["a"] * 20) + (["b"] * 20) + (["c"] * 20))
+
+    model = train_stacking_classifier(val_features, val_true, seed=42)
+    # 4 base models * 3 classes = 12 stacked features
+    assert model.n_features_in_ == 12
+    assert set(model.classes_) == {"a", "b", "c"}
+
+
+def test_stacking_multiclass_predicts_class_labels():
+    rng = np.random.RandomState(1)
+    classes = ["poder", "mercado", "outros"]
+    val_features = {f"m{i}": _make_proba_df(rng, 60, classes) for i in range(3)}
+    val_true = pd.Series((["poder"] * 20) + (["mercado"] * 20) + (["outros"] * 20))
+    model = train_stacking_classifier(val_features, val_true, seed=42)
+
+    test_features = {f"m{i}": _make_proba_df(rng, 15, classes) for i in range(3)}
+    out = predict_stacking(model, test_features)
+
+    assert "y_pred" in out.columns
+    assert set(out.columns) >= {"y_pred", "y_proba_poder", "y_proba_mercado", "y_proba_outros"}
+    assert len(out) == 15
+    assert set(out["y_pred"].unique()).issubset({"poder", "mercado", "outros"})
+    proba_cols = [c for c in out.columns if c.startswith("y_proba_")]
+    row_sums = out[proba_cols].sum(axis=1)
+    assert np.allclose(row_sums, 1.0, atol=1e-2)
+
+
+def test_stacking_binary_unchanged_with_series_input():
+    """Backward compat: dict-of-Series still produces the binary y_pred + y_score."""
+    rng = np.random.RandomState(2)
+    val_scores = {f"m{i}": pd.Series(rng.uniform(0, 1, 40)) for i in range(3)}
+    val_true = pd.Series([1] * 15 + [0] * 25)
+    model = train_stacking_classifier(val_scores, val_true)
+
+    test_scores = {f"m{i}": pd.Series(rng.uniform(0, 1, 12)) for i in range(3)}
+    out = predict_stacking(model, test_scores)
+    assert list(out.columns) == ["y_pred", "y_score"]
+    assert ((out["y_score"] >= 0) & (out["y_score"] <= 1)).all()
+
+
+def test_save_stacking_classifier_multiclass(tmp_path):
+    from economy_classifier.ensemble import save_stacking_classifier
+
+    rng = np.random.RandomState(3)
+    classes = ["a", "b", "c"]
+    val_features = {f"m{i}": _make_proba_df(rng, 40, classes) for i in range(2)}
+    val_true = pd.Series((["a"] * 15) + (["b"] * 15) + (["c"] * 10))
+    model = train_stacking_classifier(val_features, val_true, seed=42)
+
+    save_stacking_classifier(model, tmp_path)
+
+    meta = json.loads((tmp_path / "meta_classifier_meta.json").read_text())
+    assert meta["classes"] == ["a", "b", "c"]
+    assert "coefficients_per_class" in meta
+    assert len(meta["coefficients_per_class"]) == 3  # one row per class
+    assert "feature_names" in meta
+    assert all("__" in fn for fn in meta["feature_names"])  # <model>__<class>
+
+
+def test_save_stacking_classifier_binary(tmp_path):
+    from economy_classifier.ensemble import save_stacking_classifier
+
+    rng = np.random.RandomState(4)
+    val_scores = {f"m{i}": pd.Series(rng.uniform(0, 1, 30)) for i in range(2)}
+    val_true = pd.Series([1] * 12 + [0] * 18)
+    model = train_stacking_classifier(val_scores, val_true)
+
+    save_stacking_classifier(model, tmp_path, feature_names=list(val_scores))
+
+    meta = json.loads((tmp_path / "meta_classifier_meta.json").read_text())
+    assert "coefficients" in meta
+    assert "intercept" in meta
+    assert meta["feature_names"] == ["m0", "m1"]
+
+
 def test_agreement_matrix_shape():
     preds = {f"m{i}": pd.Series([1, 0, 1, 0]) for i in range(5)}
     matrix = compute_agreement_matrix(preds)
@@ -178,6 +263,31 @@ def test_fleiss_kappa_range():
     preds = {f"m{i}": pd.Series(rng.randint(0, 2, 50)) for i in range(5)}
     kappa = compute_fleiss_kappa(preds)
     assert -1.0 <= kappa <= 1.0
+
+
+def test_fleiss_kappa_multiclass_perfect_agreement():
+    """Fleiss' kappa generalises to multi-categorical labels (strings)."""
+    classes = ["poder", "mercado", "outros"]
+    preds = {f"m{i}": pd.Series(classes * 10) for i in range(4)}
+    kappa = compute_fleiss_kappa(preds)
+    assert abs(kappa - 1.0) < 1e-10
+
+
+def test_fleiss_kappa_multiclass_mixed():
+    rng = np.random.RandomState(7)
+    classes = np.array(["a", "b", "c", "d"])
+    preds = {f"m{i}": pd.Series(classes[rng.randint(0, 4, 60)]) for i in range(5)}
+    kappa = compute_fleiss_kappa(preds, categories=list(classes))
+    assert -1.0 <= kappa <= 1.0
+
+
+def test_fleiss_kappa_respects_explicit_categories():
+    """Empty schema categories should not change the kappa numerically."""
+    preds = {f"m{i}": pd.Series([1, 0, 1, 0, 1]) for i in range(3)}
+    kappa_inferred = compute_fleiss_kappa(preds)
+    kappa_explicit = compute_fleiss_kappa(preds, categories=[0, 1, 2])
+    # Adding an unseen category 2 leaves p_i and p_j unchanged for it (zeros).
+    assert abs(kappa_inferred - kappa_explicit) < 1e-10
 
 
 # ---------------------------------------------------------------------------

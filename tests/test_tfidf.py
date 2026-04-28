@@ -196,6 +196,47 @@ def test_train_tfidf_multiclass_all_classifiers(synthetic_corpus, tmp_path, clas
     assert result["predictions"]["method"].iloc[0] == f"tfidf_{classifier}_{strategy}"
 
 
+@pytest.mark.parametrize("classifier", ["logreg", "linearsvc", "multinomialnb"])
+def test_train_tfidf_multiclass_emits_proba_columns(synthetic_corpus, tmp_path, classifier):
+    """Multiclass predictions carry one y_proba_<class> column per learned class.
+
+    Required for ensemble stacking — the meta-classifier needs continuous
+    features per class (notebook 43, multi-stacking cell).
+    """
+    df = _multi_synthetic(synthetic_corpus)
+    train, val, _ = build_train_val_test_split(df, seed=42)
+    config = TfidfMulticlassConfig(
+        classifier=classifier, strategy="native",
+        max_features=100, min_df=1,
+    )
+    result = train_tfidf_multiclass(
+        train, val, label_column="label_multi", run_dir=tmp_path, config=config,
+    )
+    preds = result["predictions"]
+    proba_cols = [c for c in preds.columns if c.startswith("y_proba_")]
+    assert len(proba_cols) == len(result["labels"])
+    expected_cols = [f"y_proba_{cls}" for cls in result["labels"]]
+    assert set(proba_cols) == set(expected_cols)
+    # Each row sums to ~1 across classes.
+    row_sums = preds[proba_cols].sum(axis=1)
+    assert ((row_sums - 1.0).abs() < 1e-2).all()
+
+
+def test_train_tfidf_multiclass_linearsvc_has_predict_proba(synthetic_corpus, tmp_path):
+    """LinearSVC multiclass must be wrapped with CalibratedClassifierCV for stacking."""
+    df = _multi_synthetic(synthetic_corpus)
+    train, val, _ = build_train_val_test_split(df, seed=42)
+    config = TfidfMulticlassConfig(
+        classifier="linearsvc", strategy="native",
+        max_features=100, min_df=1,
+    )
+    train_tfidf_multiclass(
+        train, val, label_column="label_multi", run_dir=tmp_path, config=config,
+    )
+    pipeline = load_tfidf_pipeline(tmp_path / "model")
+    assert hasattr(pipeline.named_steps["clf"], "predict_proba")
+
+
 def test_train_tfidf_multiclass_rejects_invalid_strategy(synthetic_corpus, tmp_path):
     df = _multi_synthetic(synthetic_corpus)
     train, val, _ = build_train_val_test_split(df, seed=42)

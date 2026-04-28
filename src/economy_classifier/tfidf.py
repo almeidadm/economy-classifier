@@ -240,6 +240,8 @@ def _build_multiclass_pipeline(config: TfidfMulticlassConfig) -> Pipeline:
             random_state=config.seed, dual="auto",
             class_weight=config.class_weight,
         )
+        # Wrap so predict_proba is available for stacking; matches binary pipeline.
+        base = CalibratedClassifierCV(base, cv=3)
     elif config.classifier == "multinomialnb":
         base = MultinomialNB(alpha=config.alpha, fit_prior=config.fit_prior)
     else:
@@ -327,6 +329,7 @@ def train_tfidf_multiclass(
 
     t0 = time.perf_counter()
     y_pred = pipeline.predict(val_texts)
+    probas = pipeline.predict_proba(val_texts)
     inference_time = time.perf_counter() - t0
 
     from sklearn.metrics import accuracy_score, f1_score
@@ -345,12 +348,15 @@ def train_tfidf_multiclass(
     )
 
     method = f"tfidf_{config.classifier}_{config.strategy}"
+    classes = list(pipeline.named_steps["clf"].classes_)
     predictions = pd.DataFrame({
         "index": validation_df.index.tolist(),
         "y_true": validation_df[label_column].tolist(),
         "y_pred": y_pred.tolist(),
         "method": method,
     })
+    for j, cls in enumerate(classes):
+        predictions[f"y_proba_{cls}"] = np.round(probas[:, j], 4)
 
     return {
         "metrics": metrics,
@@ -361,5 +367,5 @@ def train_tfidf_multiclass(
             "train_seconds": round(train_time, 2),
             "inference_seconds": round(inference_time, 2),
         },
-        "labels": sorted(set(val_labels.tolist()) | set(y_pred.tolist())),
+        "labels": classes,
     }

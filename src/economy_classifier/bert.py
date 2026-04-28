@@ -399,6 +399,9 @@ def train_bert_multiclass(
     val_output = trainer.predict(val_dataset)
     inference_time = time.perf_counter() - t0
 
+    val_probs = torch.softmax(
+        torch.tensor(val_output.predictions, dtype=torch.float32), dim=-1,
+    ).numpy()
     y_pred_ids = np.argmax(val_output.predictions, axis=-1)
     y_pred = [id_to_label[int(i)] for i in y_pred_ids]
 
@@ -414,6 +417,8 @@ def train_bert_multiclass(
         "y_pred": y_pred,
         "method": f"{method_key}_multiclass",
     })
+    for j, cls in enumerate(label_set):
+        predictions[f"y_proba_{cls}"] = np.round(val_probs[:, j], 4)
 
     return {
         "metrics": metrics,

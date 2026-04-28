@@ -349,8 +349,12 @@ def test_bert_multiclass_runs_with_mocks(monkeypatch, synthetic_corpus, tmp_path
     assert "metrics" in result
     assert "predictions" in result
     preds = result["predictions"]
-    assert set(preds.columns) == {"index", "y_true", "y_pred", "method"}
+    expected = {"index", "y_true", "y_pred", "method"} | {f"y_proba_{c}" for c in label_set}
+    assert set(preds.columns) == expected
     assert all(p in label_set for p in preds["y_pred"].tolist())
+    proba_cols = [f"y_proba_{c}" for c in label_set]
+    row_sums = preds[proba_cols].sum(axis=1)
+    assert ((row_sums - 1.0).abs() < 1e-2).all()
 
 
 def test_bert_multiclass_rejects_unknown_labels(monkeypatch, synthetic_corpus, tmp_path):
