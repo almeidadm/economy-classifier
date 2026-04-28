@@ -127,6 +127,13 @@ def persist_run_artifacts(
 VALID_TASKS = {"binary", "multiclass"}
 VALID_REGIMES = {"fixed_split", "cv_5fold", "test_set"}
 
+# Scoring strings expected per task. TF-IDF uses sklearn naming ("f1_macro"),
+# BERT uses an internal name ("macro_f1"); both are accepted.
+_VALID_SCORING_BY_TASK = {
+    "binary": {"f1"},
+    "multiclass": {"f1_macro", "macro_f1"},
+}
+
 
 def compute_artifact_size_mb(path: Path) -> float:
     """File size in MB if *path* is a file, sum of files if directory."""
@@ -159,6 +166,20 @@ def build_result_card(
         raise ValueError(f"task must be one of {VALID_TASKS}, got {task!r}")
     if regime not in VALID_REGIMES:
         raise ValueError(f"regime must be one of {VALID_REGIMES}, got {regime!r}")
+
+    # Guard against the class of bug where a SearchResult.card_payload from a
+    # different task is passed in (e.g. multiclass payload reused in a binary
+    # card). Catches scoring/task mismatch at the boundary.
+    if hyperparameter_search is not None:
+        hp_scoring = hyperparameter_search.get("scoring")
+        if hp_scoring is not None:
+            allowed = _VALID_SCORING_BY_TASK[task]
+            if hp_scoring not in allowed:
+                raise ValueError(
+                    f"hyperparameter_search.scoring={hp_scoring!r} is incompatible "
+                    f"with task={task!r}; expected one of {sorted(allowed)}. "
+                    f"Likely a SearchResult from the other task was passed."
+                )
 
     return {
         "model_id": model_id,

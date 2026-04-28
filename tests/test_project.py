@@ -169,6 +169,59 @@ def test_build_result_card_default_hyperparameter_search_is_none():
     assert card["hyperparameter_search"] is None
 
 
+def test_build_result_card_rejects_binary_with_macro_scoring():
+    with pytest.raises(ValueError, match="incompatible"):
+        build_result_card(
+            model_id="tfidf_logreg", task="binary", regime="test_set",
+            metrics={}, cost={}, config={},
+            hyperparameter_search={
+                "best_params": {}, "best_score": 0.0, "n_trials": 60,
+                "search_seconds": 1.0, "scoring": "f1_macro",
+                "search_space": {},
+            },
+        )
+
+
+def test_build_result_card_rejects_multiclass_with_binary_scoring():
+    with pytest.raises(ValueError, match="incompatible"):
+        build_result_card(
+            model_id="tfidf_logreg", task="multiclass", regime="test_set",
+            metrics={}, cost={}, config={},
+            hyperparameter_search={
+                "best_params": {}, "best_score": 0.0, "n_trials": 60,
+                "search_seconds": 1.0, "scoring": "f1",
+                "search_space": {},
+            },
+        )
+
+
+def test_build_result_card_accepts_macro_f1_alias_for_multiclass():
+    """BERT uses 'macro_f1' (its internal name) instead of sklearn's 'f1_macro'."""
+    card = build_result_card(
+        model_id="bert", task="multiclass", regime="test_set",
+        metrics={}, cost={}, config={},
+        hyperparameter_search={
+            "best_params": {}, "best_score": 0.0, "n_trials": 25,
+            "search_seconds": 1.0, "scoring": "macro_f1",
+            "search_space": {},
+        },
+    )
+    assert card["hyperparameter_search"]["scoring"] == "macro_f1"
+
+
+def test_build_result_card_allows_null_scoring_in_search_payload():
+    """Some search payloads may carry scoring=None; treat as unspecified, not invalid."""
+    card = build_result_card(
+        model_id="x", task="binary", regime="test_set",
+        metrics={}, cost={}, config={},
+        hyperparameter_search={
+            "best_params": {}, "best_score": 0.0, "n_trials": 0,
+            "search_seconds": 0.0, "scoring": None, "search_space": {},
+        },
+    )
+    assert card["hyperparameter_search"]["scoring"] is None
+
+
 def test_persist_result_card_writes_json(tmp_path):
     card = build_result_card(
         model_id="x", task="binary", regime="test_set",
