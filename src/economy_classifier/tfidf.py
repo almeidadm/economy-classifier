@@ -46,7 +46,7 @@ class TfidfTrainingConfig:
     fit_prior: bool = True
     class_weight: str | None = None
     max_iter: int = 1000
-    seed: int = 42
+    seed: int = 2026
 
     def to_dict(self) -> dict[str, object]:
         return {

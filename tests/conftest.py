@@ -232,6 +232,11 @@ def synthetic_corpus() -> pd.DataFrame:
 def synthetic_splits(synthetic_corpus):
     """Train/val/test derived from synthetic corpus with seed=42.
 
+    The fixture seed (42) deliberately differs from the production global
+    (seed=2026). Tests check structural properties (stratification, sizes,
+    determinism), not specific row indices, so the value of the seed is
+    arbitrary as long as it is fixed.
+
     Returns (train_df, val_df, test_df).
     """
     from economy_classifier.datasets import build_train_val_test_split

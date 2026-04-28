@@ -40,7 +40,7 @@ class BertTrainingConfig:
     num_train_epochs: int = 3
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
-    seed: int = 42
+    seed: int = 2026
     early_stopping_patience: int = 1
     save_total_limit: int = 2
     gradient_checkpointing: bool = False

@@ -80,7 +80,7 @@ def train_stacking_classifier(
     val_features: dict[str, pd.Series | pd.DataFrame],
     val_true: pd.Series,
     *,
-    seed: int = 42,
+    seed: int = 2026,
 ) -> LogisticRegression:
     """Train a meta-classifier on validation-set features (no leakage).
 

@@ -24,7 +24,7 @@ def build_train_val_test_split(
     dataframe: pd.DataFrame,
     *,
     label_column: str = "label",
-    seed: int = 42,
+    seed: int = 2026,
     test_size: float = 0.10,
     val_size: float = 0.10,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -59,7 +59,7 @@ def build_balanced_training_frame(
     dataframe: pd.DataFrame,
     *,
     label_column: str = "label",
-    seed: int = 42,
+    seed: int = 2026,
 ) -> pd.DataFrame:
     """Downsample the majority class to match the minority class count.
 
@@ -80,7 +80,7 @@ def build_cv_folds(
     *,
     label_column: str = "label",
     n_folds: int = 5,
-    seed: int = 42,
+    seed: int = 2026,
 ) -> list[dict[str, list]]:
     """Build *n_folds* stratified CV folds over *dataframe* (preserves index labels).
 

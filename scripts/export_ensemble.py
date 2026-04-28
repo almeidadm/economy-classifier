@@ -74,8 +74,8 @@ def export_ensemble(name: str, runs: dict) -> None:
     y_true_val = vp["y_true"]
 
     # Train meta-classifier
-    print("\nTreinando meta-classificador (LogReg, seed=42)...")
-    meta_model = train_stacking_classifier(val_scores, y_true_val, seed=42)
+    print("\nTreinando meta-classificador (LogReg, seed=2026)...")
+    meta_model = train_stacking_classifier(val_scores, y_true_val, seed=2026)
 
     coefs = dict(zip(methods, meta_model.coef_[0]))
     print("Coeficientes:")

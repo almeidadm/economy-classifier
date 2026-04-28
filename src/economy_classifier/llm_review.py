@@ -197,7 +197,7 @@ def build_few_shot_examples(
     valid_labels: tuple[str, ...] = VALID_BINARY_LABELS,
     n_per_class: int = 2,
     text_max_chars: int = 500,
-    seed: int = 42,
+    seed: int = 2026,
 ) -> list[tuple[str, str]]:
     """Sample ``n_per_class`` labeled examples from *df* for few-shot prompting.
 

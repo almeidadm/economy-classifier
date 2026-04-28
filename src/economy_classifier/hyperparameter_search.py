@@ -154,7 +154,7 @@ def _build_search_pipeline(
     *,
     multiclass: bool = False,
     strategy: str = "native",
-    seed: int = 42,
+    seed: int = 2026,
 ) -> Pipeline:
     """Pipeline used during hyperparameter search.
 
@@ -190,18 +190,19 @@ def random_search_tfidf(
     strategy: str = "native",
     n_iter: int = 60,
     cv_n_splits: int = 5,
-    cv_seed: int = 43,
+    cv_seed: int = 2027,
     scoring: str | None = None,
     n_jobs: int = 2,
-    seed: int = 42,
+    seed: int = 2026,
     search_space: dict | None = None,
     verbose: int = 1,
 ) -> SearchResult:
     """Run ``RandomizedSearchCV`` over a TF-IDF pipeline.
 
-    The inner CV uses ``cv_seed`` (default 43) so it produces *different* folds
-    from ``artifacts/splits/cv_folds.json`` (seed=42) — the post-search
-    ``cv_5fold`` regime then provides an independent variance estimate.
+    The inner CV uses ``cv_seed`` (default 2027) so it produces *different* folds
+    from ``artifacts/splits/cv_folds.json`` (historically seed=42, current default
+    seed=2026) — the post-search ``cv_5fold`` regime then provides an independent
+    variance estimate.
 
     ``n_jobs`` defaults to 2 because Colab/free instances run out of memory
     with ``-1`` once the pool exceeds ~100k samples (each worker pickles the
@@ -318,7 +319,7 @@ def random_search_bert(
     search_space: dict | None = None,
     n_iter: int = 25,
     scoring: str | None = None,
-    seed: int = 42,
+    seed: int = 2026,
     keep_trial_artifacts: bool = False,
 ) -> SearchResult:
     """Custom random search for BERT (HF Trainer doesn't fit sklearn's CV API).
