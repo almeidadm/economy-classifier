@@ -36,6 +36,68 @@ def compute_roc_auc(
     return float(roc_auc_score(y_true, y_score))
 
 
+def compute_brier_score(
+    y_true: np.ndarray | pd.Series,
+    y_score: np.ndarray | pd.Series,
+) -> float:
+    """Brier score for binary predictions: mean squared error between score and label.
+
+    ``brier = mean((y_score - y_true)**2)``. Lower is better (0.0 = perfect).
+
+    Meaningful only when ``y_score`` is a calibrated probability (TF-IDF +
+    CalibratedClassifierCV, BERT softmax). For LLMs with deterministic
+    ``y_score in {0.0, 1.0}``, Brier collapses to ``1 - accuracy``; report it
+    but interpret with the caveat that it does not measure calibration there.
+    """
+    y_true_arr = np.asarray(y_true, dtype=float)
+    y_score_arr = np.asarray(y_score, dtype=float)
+    if len(y_true_arr) == 0:
+        return 0.0
+    return round(float(np.mean((y_score_arr - y_true_arr) ** 2)), 4)
+
+
+def compute_ece(
+    y_true: np.ndarray | pd.Series,
+    y_score: np.ndarray | pd.Series,
+    *,
+    n_bins: int = 10,
+) -> float:
+    """Expected Calibration Error (binary) with equal-width binning.
+
+    ``ECE = sum_b (n_b / n) * |acc_b - conf_b|`` where ``acc_b`` is the
+    positive fraction in bin ``b`` and ``conf_b`` is the mean predicted score.
+    Lower is better (0.0 = perfectly calibrated).
+
+    Meaningful only when ``y_score`` covers a continuous range. For LLMs with
+    deterministic scores, almost all mass lands in two bins (0.0 and 1.0) —
+    the ECE then approximates miscalibration relative to a hard 0/1 forecaster
+    and is mostly redundant with ``1 - accuracy``.
+    """
+    y_true_arr = np.asarray(y_true, dtype=float)
+    y_score_arr = np.asarray(y_score, dtype=float)
+    n = len(y_true_arr)
+    if n == 0:
+        return 0.0
+    if n_bins < 1:
+        raise ValueError(f"n_bins must be >= 1, got {n_bins}")
+
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    # digitize against interior edges so scores in [edges[b], edges[b+1]) map to b,
+    # with the right boundary inclusive for the final bin.
+    bin_idx = np.clip(np.digitize(y_score_arr, edges[1:-1]), 0, n_bins - 1)
+
+    ece = 0.0
+    for b in range(n_bins):
+        mask = bin_idx == b
+        n_b = int(mask.sum())
+        if n_b == 0:
+            continue
+        acc_b = float(y_true_arr[mask].mean())
+        conf_b = float(y_score_arr[mask].mean())
+        ece += (n_b / n) * abs(acc_b - conf_b)
+    return round(float(ece), 4)
+
+
 def compute_mcnemar_test(
     y_true: np.ndarray,
     y_pred_a: np.ndarray,

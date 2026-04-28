@@ -2,10 +2,13 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 from economy_classifier.evaluation import (
     compute_binary_metrics,
+    compute_brier_score,
     compute_confusion_matrix,
     compute_cost_metrics,
+    compute_ece,
     compute_mcnemar_test,
     compute_multiclass_metrics,
     compute_roc_auc,
@@ -47,6 +50,74 @@ def test_metrics_no_positives_predicted():
     assert m["precision"] == 0.0
     assert m["recall"] == 0.0
     assert m["f1"] == 0.0
+
+
+def test_brier_perfect_predictions():
+    y_true = pd.Series([1, 0, 1, 0])
+    y_score = pd.Series([1.0, 0.0, 1.0, 0.0])
+    assert compute_brier_score(y_true, y_score) == 0.0
+
+
+def test_brier_worst_predictions():
+    y_true = pd.Series([1, 0, 1, 0])
+    y_score = pd.Series([0.0, 1.0, 0.0, 1.0])
+    assert compute_brier_score(y_true, y_score) == 1.0
+
+
+def test_brier_uncertain_scores():
+    y_true = pd.Series([1, 0])
+    y_score = pd.Series([0.5, 0.5])
+    # MSE = ((0.5-1)^2 + (0.5-0)^2) / 2 = 0.25
+    assert compute_brier_score(y_true, y_score) == 0.25
+
+
+def test_brier_deterministic_llm_collapses_to_one_minus_accuracy():
+    """For LLM-style {0,1} scores, Brier == fraction wrong."""
+    y_true = pd.Series([1, 1, 0, 0])
+    y_score = pd.Series([1.0, 0.0, 0.0, 1.0])  # 2 wrong out of 4
+    # Brier = ((1-1)^2 + (0-1)^2 + (0-0)^2 + (1-0)^2) / 4 = 2/4 = 0.5
+    assert compute_brier_score(y_true, y_score) == 0.5
+
+
+def test_brier_empty_input():
+    assert compute_brier_score(pd.Series([], dtype=float), pd.Series([], dtype=float)) == 0.0
+
+
+def test_ece_perfectly_calibrated_uniform_scores():
+    """Scores spread over [0,1] matching outcomes proportionally → ECE close to 0."""
+    rng = np.random.default_rng(0)
+    y_score = rng.uniform(0, 1, size=10_000)
+    y_true = (rng.uniform(0, 1, size=10_000) < y_score).astype(int)
+    ece = compute_ece(y_true, y_score, n_bins=10)
+    assert ece < 0.02  # Monte Carlo noise tolerance
+
+
+def test_ece_systematic_overconfidence():
+    """Scores all 0.9 but only 50% positive → ECE ~ 0.4."""
+    y_true = pd.Series([1] * 50 + [0] * 50)
+    y_score = pd.Series([0.9] * 100)
+    ece = compute_ece(y_true, y_score, n_bins=10)
+    # All scores in last bin: |0.5 - 0.9| = 0.4
+    assert abs(ece - 0.4) < 1e-3
+
+
+def test_ece_perfect_predictions_zero():
+    y_true = pd.Series([1, 1, 0, 0])
+    y_score = pd.Series([0.95, 0.91, 0.05, 0.09])
+    # Bin 9 (0.9-1.0): conf=0.93, acc=1.0 → diff=0.07; weight=0.5
+    # Bin 0 (0.0-0.1): conf=0.07, acc=0.0 → diff=0.07; weight=0.5
+    # ECE = 0.07
+    ece = compute_ece(y_true, y_score, n_bins=10)
+    assert abs(ece - 0.07) < 1e-3
+
+
+def test_ece_empty_input():
+    assert compute_ece(pd.Series([], dtype=float), pd.Series([], dtype=float)) == 0.0
+
+
+def test_ece_rejects_zero_bins():
+    with pytest.raises(ValueError):
+        compute_ece(pd.Series([0.5]), pd.Series([0.5]), n_bins=0)
 
 
 def test_mcnemar_identical_predictions():
