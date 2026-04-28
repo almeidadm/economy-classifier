@@ -407,7 +407,7 @@ LLM_REGISTRY: dict[str, str] = {
     # Substitui Llama-3.1-8B enquanto acesso a meta-llama/* nao sai.
     "mistral-7b-instruct-v0.3": "mistralai/Mistral-7B-Instruct-v0.3",
     # Llama 3.1 community license (gated on HF). Reativar trocando a chave usada
-    # em LLMS no notebook 13 quando o acesso for aprovado.
+    # em LLMS no notebook 31 quando o acesso for aprovado.
     # "llama-3.1-8b-instruct": "meta-llama/Llama-3.1-8B-Instruct",
 }
 

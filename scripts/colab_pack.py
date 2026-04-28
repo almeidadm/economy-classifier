@@ -53,7 +53,7 @@ def main() -> None:
     print(f"\nArquivo gerado: {OUTPUT_ZIP}")
     print(f"Tamanho total: {total_mb:.1f} MB")
     print("\nProximo passo: faça upload deste arquivo para o Google Drive")
-    print("e abra o notebook 05_bert_colab.ipynb no Colab.")
+    print("e abra o notebook 21_bert.ipynb no Colab.")
 
 
 if __name__ == "__main__":

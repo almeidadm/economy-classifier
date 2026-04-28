@@ -57,7 +57,7 @@ def export_ensemble(name: str, runs: dict) -> None:
     missing = [m for m in methods if m not in runs]
     if missing:
         print(f"ERRO: Metodos nao encontrados: {missing}")
-        print("Execute os notebooks 01-06 e desempacote os resultados BERT.")
+        print("Execute os notebooks 01, 11-13, 21 e desempacote os resultados BERT.")
         sys.exit(1)
 
     # Load validation predictions

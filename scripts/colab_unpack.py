@@ -49,7 +49,7 @@ def main() -> None:
         zf.extractall(RUNS_DIR)
 
     print(f"\nArtefatos extraidos em: {RUNS_DIR}")
-    print("\nConteudo integrado. Prossiga com o notebook 07_avaliacao_comparativa.")
+    print("\nConteudo integrado. Prossiga com o notebook 43_ensemble.")
 
 
 if __name__ == "__main__":

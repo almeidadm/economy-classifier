@@ -488,7 +488,7 @@ A tabela tem uma linha por metodo/ensemble e as seguintes colunas:
 
 1. **Notebooks sao orquestradores.** Toda logica reutilizavel esta em `src/economy_classifier/`. Notebooks importam funcoes, definem configuracao e exibem resultados.
 
-2. **Numeracao sequencial.** Notebooks sao numerados na ordem de execucao logica. Nao precisa ser a ordem de implementacao.
+2. **Numeracao por faixa.** Notebooks sao agrupados por etapa do pipeline (`0x` dados, `1x` TF-IDF, `2x` BERT, `3x` LLM, `4x` sintese, `9x` smoke/auditoria). Slots dentro de cada faixa ficam reservados para crescimento sem reabrir buracos.
 
 3. **Celulas de cabecalho.** Todo notebook comeca com:
    - Celula markdown: titulo, objetivo, dependencias
@@ -502,13 +502,15 @@ A tabela tem uma linha por metodo/ensemble e as seguintes colunas:
 | Notebook | Responsabilidade | Metodos |
 |----------|-----------------|---------|
 | `01_preparacao_dados.ipynb` | Carga do corpus, binarizacao, geracao dos splits, persistencia | — |
-| `02_tfidf_logreg.ipynb` | Treino e avaliacao de M1 no val | M1 |
-| `03_tfidf_linearsvc.ipynb` | Treino e avaliacao de M2 no val | M2 |
-| `04_tfidf_multinomialnb.ipynb` | Treino e avaliacao de M3 no val | M3 |
-| `05_bert_bertimbau.ipynb` | Treino e avaliacao de M4a no val | M4a |
-| `05b_bert_finbert_ptbr.ipynb` | Treino e avaliacao de M4b no val | M4b |
-| `05c_bert_deb3rta.ipynb` | Treino e avaliacao de M4c no val | M4c |
-| `07_avaliacao_comparativa.ipynb` | Comparacao no val, ensembles, avaliacao final no teste | Todos + E1-E4 |
+| `11_tfidf_logreg.ipynb` | Search + 6 regimes (binario/multi x fixed/cv/test) | M1 |
+| `12_tfidf_linearsvc.ipynb` | Search + 6 regimes | M2 |
+| `13_tfidf_multinomialnb.ipynb` | Search + 6 regimes | M3 |
+| `21_bert.ipynb` | 3 modelos BERT x 6 regimes (config fixa da literatura) | M4a/M4b/M4c |
+| `31_llm_hf.ipynb` | 2 LLMs x 2 tarefas x 2 estrategias (zero/few-shot) | LLMs |
+| `41_eda_resultados.ipynb` | EDA dos `result_card.json` e `predictions.csv` | — |
+| `42_comparacao.ipynb` | (reservado) Tabela final do artigo + McNemar | Todos |
+| `43_ensemble.ipynb` | Voting + stacking sobre os 4 modelos base | E1-E4 |
+| `91_smoke_multiclasse_tfidf.ipynb` | Smoke da Fase 1 (auditoria do pivot multiclasse) | — |
 
 ---
 

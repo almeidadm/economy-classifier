@@ -286,19 +286,19 @@ O stacking (E3) treina uma `LogisticRegression` sobre uma matriz de 7 features x
 
 ### 4.1 Tempo de execucao
 
-Execucao sequencial, do notebook 01 ao 07:
+Execucao sequencial, do notebook 01 ao 43:
 
 | Etapa | Descricao | Tempo estimado |
 |-------|-----------|---------------|
 | 01 | Carga do corpus, splits, persistencia | ~2-3 min |
-| 02 | TF-IDF + LogReg (treino + eval no val) | ~2-3 min |
-| 03 | TF-IDF + LinearSVC (treino + eval no val) | ~4-6 min |
-| 04 | TF-IDF + MultinomialNB (treino + eval no val) | ~1-2 min |
-| 05 | BERT BERTimbau (treino + eval no val) | ~3-4 h |
-| 05b | BERT FinBERT-PT-BR (treino + eval no val) | ~3-4 h |
-| 05c | DeBERTa DeB3RTa-base (treino + eval no val) | ~2-3 h |
-| 07 | Inferencia no teste (6 metodos) | ~30-45 min |
-| 07 | Ensembles + McNemar + figuras | ~5-10 min |
+| 11 | TF-IDF + LogReg (treino + eval no val) | ~2-3 min |
+| 12 | TF-IDF + LinearSVC (treino + eval no val) | ~4-6 min |
+| 13 | TF-IDF + MultinomialNB (treino + eval no val) | ~1-2 min |
+| 21 | BERT BERTimbau (treino + eval no val) | ~3-4 h |
+| 21 | BERT FinBERT-PT-BR (treino + eval no val) | ~3-4 h |
+| 21 | DeBERTa DeB3RTa-base (treino + eval no val) | ~2-3 h |
+| 43 | Inferencia no teste (6 metodos) | ~30-45 min |
+| 43 | Ensembles + McNemar + figuras | ~5-10 min |
 | **Total** | | **~10-14 horas** |
 
 **O gargalo absoluto e o treino dos 3 modelos BERT, que representa ~90% do tempo total.**
@@ -320,14 +320,14 @@ Execucao sequencial, do notebook 01 ao 07:
 Fase          CPU    RAM     GPU    VRAM    Disco
 ────────────  ─────  ──────  ─────  ──────  ──────
 01 Splits     medio  ~1 GB   idle   0       ~50 MB
-02 M1 LogReg  alto   ~3 GB   idle   0       +50 MB
-03 M2 SVC     alto   ~3.5GB  idle   0       +80 MB
-04 M3 NB      medio  ~2.5GB  idle   0       +30 MB
-05 M4a BERT   baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
-05b M4b BERT  baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
-05c M4c BERT  baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
-06 M5 Heur.   medio  ~1 GB   idle   0       +5 MB
-07 Eval+Ens.  medio  ~2 GB   medio  ~700MB  +100 MB
+11 M1 LogReg  alto   ~3 GB   idle   0       +50 MB
+12 M2 SVC     alto   ~3.5GB  idle   0       +80 MB
+13 M3 NB      medio  ~2.5GB  idle   0       +30 MB
+21 M4a BERT   baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
+21 M4b BERT   baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
+21 M4c BERT   baixo  ~3 GB   ALTO   ~2.5GB  +1.7 GB
+31 LLM HF     baixo  ~3 GB   ALTO   ~14 GB  +0 GB (pesos cache HF)
+43 Eval+Ens.  medio  ~2 GB   medio  ~700MB  +100 MB
 ```
 
 ---
@@ -352,7 +352,7 @@ Fase          CPU    RAM     GPU    VRAM    Disco
 **Mitigacoes:**
 
 1. **Salvar checkpoints por epoca** (ja configurado) — permite retomar treino interrompido.
-2. **Treinar um modelo por vez** — executar notebooks 05, 05b, 05c em sessoes separadas.
+2. **Treinar um modelo por vez** — editar `MODELS = [...]` em `21_bert.ipynb` para rodar um BERT por sessao.
 3. **Aumentar `per_device_eval_batch_size`** — de 1 para 8, reduzindo tempo de avaliacao de ~18 min para ~3 min por epoca (economia de ~45 min por modelo).
 4. **Considerar Google Colab** (GPU T4, 15 GB VRAM) para os treinos BERT se a maquina local for instavel.
 
@@ -389,9 +389,10 @@ BertTrainingConfig(
 
 ### 6.2 Ordem de execucao sugerida
 
-1. Executar notebooks 01-04 primeiro (TF-IDF) — ~15 min total. Isso valida todo o pipeline sem depender da GPU.
-2. Executar notebooks 05, 05b, 05c um por vez, verificando estabilidade.
-3. Executar notebook 07 por ultimo.
+1. Executar notebooks 01, 11, 12, 13 primeiro (TF-IDF) — ~15 min total. Isso valida todo o pipeline sem depender da GPU.
+2. Executar `21_bert.ipynb` para os 3 BERTs (um por sessao se necessario), verificando estabilidade.
+3. Executar `31_llm_hf.ipynb` para LLMs (zero-shot + few-shot).
+4. Executar `41_eda_resultados.ipynb`, `42_comparacao.ipynb` (reservado) e `43_ensemble.ipynb` por ultimo.
 
 ### 6.3 Monitoramento durante treino BERT
 
@@ -468,6 +469,6 @@ Para os 3 modelos BERT x 2 tarefas: ~96-192 h (T4) ou ~30-60 h (A100). **A100 e 
 Se o tempo total for inviavel:
 
 1. **Reduzir `N_ITER_BERT`** de 25 para 10-15 (perde resolucao da busca, mantem o restante).
-2. **Rodar so binario** (comente celulas multiclasse no notebook 05). Reduz pela metade.
+2. **Rodar so binario** (comente celulas multiclasse no notebook 21). Reduz pela metade.
 3. **Rodar so 1-2 modelos BERT** (edite `MODELS = [...]`). FinBERT e DeB3RTa podem ser ablacao.
 4. **`N_ITER_TFIDF`** de 60 para 30 (pouco impacto pratico — TF-IDF satura rapido).

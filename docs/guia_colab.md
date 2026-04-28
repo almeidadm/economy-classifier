@@ -16,7 +16,7 @@ A GPU T4 (16 GB) e insuficiente para o orcamento completo no tempo disponivel. *
 | Tempo medio por trial | ~30-60 min | ~10-15 min |
 | Tempo total (3 modelos x 2 tarefas x ~50 fits) | ~5-10 dias | ~1-3 dias |
 
-Se voce so tem T4 disponivel, ajuste no notebook 05:
+Se voce so tem T4 disponivel, ajuste no notebook 21:
 - Reduza `N_ITER_BERT` de 25 para 5-10
 - Comente modelos em `MODELS = [...]` para rodar um por vez
 - Considere rodar so as tarefas binarias (comente as celulas multiclasse)
@@ -30,7 +30,7 @@ LOCAL                           COLAB                           LOCAL
 ─────                           ─────                           ─────
 
 1. Notebook 01                  3. Abrir notebook               6. Baixar resultados
-   (gerar splits)                  05_bert_colab.ipynb              do Drive
+   (gerar splits)                  21_bert.ipynb                   do Drive
         │                              │
         ▼                              ▼
 2. colab_pack.py                4. Treinar M4a, M4b, M4c       7. colab_unpack.py
@@ -100,13 +100,13 @@ My Drive/
 1. Acesse [colab.research.google.com](https://colab.research.google.com)
 2. Arquivo > Abrir notebook > GitHub
 3. Cole a URL do repositorio
-4. Selecione `notebooks/05_bert_colab.ipynb`
+4. Selecione `notebooks/21_bert.ipynb`
 
 **Opcao B — Upload direto:**
 
 1. Acesse [colab.research.google.com](https://colab.research.google.com)
 2. Arquivo > Fazer upload de notebook
-3. Selecione o arquivo `notebooks/05_bert_colab.ipynb` do repositorio local
+3. Selecione o arquivo `notebooks/21_bert.ipynb` do repositorio local
 
 ### Passo 5 — Configurar runtime com GPU
 
@@ -187,14 +187,16 @@ Runs encontrados no zip: 3
 Artefatos extraidos em: /path/to/economy-classifier/artifacts/runs/
 ```
 
-Os artefatos ficam em `artifacts/runs/`, no formato padrao do projeto. O notebook 07 pode carrega-los para a avaliacao comparativa final.
+Os artefatos ficam em `artifacts/runs/`, no formato padrao do projeto. Os notebooks 41 (EDA), 42 (tabela final, reservado) e 43 (ensemble) podem carrega-los para a avaliacao comparativa final.
 
 ### Passo 10 — Continuar com a avaliacao (local)
 
 Com os artefatos BERT integrados, prossiga com os notebooks restantes:
 
 ```
-07_avaliacao_comparativa.ipynb → Comparacao final no teste
+41_eda_resultados.ipynb       → EDA dos result_cards
+42_comparacao.ipynb           → Tabela final do artigo (reservado)
+43_ensemble.ipynb             → Voting + stacking sobre os 4 modelos base
 ```
 
 ---
@@ -309,6 +311,6 @@ DeB3RTa-base usa tokenizer SentencePiece (DeBERTa-v2). No Colab, instale com `pi
 |---------|-----------|
 | `scripts/colab_pack.py` | Empacota splits para upload ao Colab |
 | `scripts/colab_unpack.py` | Integra resultados do Colab ao repositorio local |
-| `notebooks/05_bert_colab.ipynb` | Notebook de treino para Google Colab |
+| `notebooks/21_bert.ipynb` | Notebook de treino para Google Colab |
 | `src/economy_classifier/bert.py` | Modulo de treino e inferencia BERT |
 | `docs/estimativa_recursos_computacionais.md` | Estimativas detalhadas de tempo e recursos |

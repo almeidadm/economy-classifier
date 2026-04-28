@@ -151,7 +151,7 @@ def build_result_card(
 ) -> dict:
     """Standardized result card for cross-model comparison.
 
-    All notebooks emit this JSON so notebook 12 can aggregate without per-model logic.
+    All notebooks emit this JSON so notebook 42 can aggregate without per-model logic.
     The optional ``hyperparameter_search`` field carries the
     :meth:`SearchResult.card_payload` from a preceding RandomizedSearchCV run.
     """

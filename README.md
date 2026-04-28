@@ -31,12 +31,17 @@ economy-classifier/
         project.py              #   Runs, artefatos, result_card
         visualization.py        #   Figuras em PNG 300 DPI + PDF
     tests/                      # 200 testes (pytest)
-    notebooks/                  # Orquestracao do pipeline
-        01_preparacao_dados     #   Carga, binarizacao, splits 80/10/10, cv_folds.json
-        02_tfidf_logreg         #   M1: search + 6 regimes (binario/multi x fixed/cv/test)
-        03_tfidf_linearsvc      #   M2: search + 6 regimes
-        04_tfidf_multinomialnb  #   M3: search + 6 regimes
-        05_bert_colab           #   M4a/M4b/M4c: search + 6 regimes (Google Colab A100)
+    notebooks/                  # Orquestracao do pipeline (numeracao por faixa)
+        01_preparacao_dados     #   Dados: carga, binarizacao, splits 80/10/10, cv_folds.json
+        11_tfidf_logreg         #   TF-IDF M1: search + 6 regimes (binario/multi x fixed/cv/test)
+        12_tfidf_linearsvc      #   TF-IDF M2: search + 6 regimes
+        13_tfidf_multinomialnb  #   TF-IDF M3: search + 6 regimes
+        21_bert                 #   BERT M4a/M4b/M4c: 6 regimes (Google Colab L4/A100)
+        31_llm_hf               #   LLMs Qwen/Mistral: zero-shot + few-shot, binario + multi
+        41_eda_resultados       #   EDA dos result_cards e predictions
+        42_comparacao           #   (reservado) Tabela final do artigo + McNemar
+        43_ensemble             #   Voting + stacking sobre os 4 modelos base
+        91_smoke_multiclasse_tfidf   # Smoke da Fase 1 (auditoria) — TF-IDF native vs OvR
     scripts/                    # Utilidades
         colab_pack.py           #   Empacotar splits para upload ao Colab
         colab_unpack.py         #   Integrar resultados do Colab localmente
@@ -78,7 +83,7 @@ uv run pytest -m "not slow"     # somente rapidos
 
 ```bash
 # 01: gerar splits
-# 02-04: treinar M1, M2, M3
+# 11-13: treinar M1, M2, M3 (TF-IDF)
 ```
 
 ### Pipeline BERT (Google Colab)
@@ -90,7 +95,7 @@ Os modelos BERT sao treinados no Google Colab com **GPU A100** (necessaria para 
 uv run python scripts/colab_pack.py
 
 # 2. Upload colab_splits.zip para Google Drive
-# 3. Abrir notebooks/05_bert_colab.ipynb no Colab (Runtime > A100)
+# 3. Abrir notebooks/21_bert.ipynb no Colab (Runtime > A100)
 # 4. Executar (search + 6 regimes x 3 modelos ~ 1-3 dias em A100)
 
 # 5. Baixar resultados e integrar

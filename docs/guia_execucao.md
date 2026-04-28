@@ -16,18 +16,20 @@ Documento pratico para conduzir uma rodada completa do pipeline (search + 3 regi
 │                            artifacts/splits/cv_folds.json            │
 │                                                                      │
 │   ETAPA 2 (LOCAL OU COLAB CPU)                                       │
-│   02_tfidf_logreg       →  6 result_cards + 2 search logs (M1)       │
-│   03_tfidf_linearsvc    →  6 result_cards + 2 search logs (M2)       │
-│   04_tfidf_multinomialnb→  6 result_cards + 2 search logs (M3)       │
+│   11_tfidf_logreg       →  6 result_cards + 2 search logs (M1)       │
+│   12_tfidf_linearsvc    →  6 result_cards + 2 search logs (M2)       │
+│   13_tfidf_multinomialnb→  6 result_cards + 2 search logs (M3)       │
 │                                                                      │
 │   ETAPA 3 (COLAB A100)                                               │
 │   colab_pack.py         →  colab_splits.zip  (upload pro Drive)      │
-│   05_bert_colab         →  18 result_cards + 6 search logs (M4a/b/c) │
+│   21_bert               →  18 result_cards + 6 search logs (M4a/b/c) │
 │   colab_unpack.py       →  integra resultados localmente             │
 │                                                                      │
 │   ETAPA 4 (LOCAL)                                                    │
-│   07_ensemble           →  4 ensembles (E1-E4) sobre o test_set      │
-│   12_comparacao         →  tabela final (todos x todos os regimes)   │
+│   31_llm_hf             →  8 result_cards (2 LLMs x 2 tasks x 2)     │
+│   41_eda_resultados     →  EDA dos result_cards e predictions        │
+│   43_ensemble           →  4 ensembles (E1-E4) sobre o test_set      │
+│   42_comparacao         →  tabela final (todos x todos os regimes)   │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 
@@ -54,7 +56,7 @@ Saida total esperada:
 
 **Decisao importante antes de comecar**: vai rodar BERT em A100 ou T4?
 - **A100** (recomendado): tempo total ~1-3 dias; custo ~5-15 unidades de computacao Colab/hora
-- **T4** (orcamento reduzido): edite `N_ITER_BERT=10` e/ou `MODELS=[("bertimbau", ...)]` no notebook 05; tempo ~1 dia por modelo
+- **T4** (orcamento reduzido): edite `N_ITER_BERT=10` e/ou `MODELS=[("bertimbau", ...)]` no notebook 21; tempo ~1 dia por modelo
 
 ---
 
@@ -115,24 +117,24 @@ Os 3 notebooks sao **independentes** e podem rodar em paralelo (em terminais dif
 ### Como executar (sequencial, terminal a terminal)
 
 ```bash
-# Notebook 02 — Logistic Regression
-uv run jupyter nbconvert --to notebook --execute notebooks/02_tfidf_logreg.ipynb \
-    --output 02_tfidf_logreg.executed.ipynb
+# Notebook 11 — Logistic Regression
+uv run jupyter nbconvert --to notebook --execute notebooks/11_tfidf_logreg.ipynb \
+    --output 11_tfidf_logreg.executed.ipynb
 
-# Notebook 03 — LinearSVC
-uv run jupyter nbconvert --to notebook --execute notebooks/03_tfidf_linearsvc.ipynb \
-    --output 03_tfidf_linearsvc.executed.ipynb
+# Notebook 12 — LinearSVC
+uv run jupyter nbconvert --to notebook --execute notebooks/12_tfidf_linearsvc.ipynb \
+    --output 12_tfidf_linearsvc.executed.ipynb
 
-# Notebook 04 — Multinomial NB
-uv run jupyter nbconvert --to notebook --execute notebooks/04_tfidf_multinomialnb.ipynb \
-    --output 04_tfidf_multinomialnb.executed.ipynb
+# Notebook 13 — Multinomial NB
+uv run jupyter nbconvert --to notebook --execute notebooks/13_tfidf_multinomialnb.ipynb \
+    --output 13_tfidf_multinomialnb.executed.ipynb
 ```
 
 Alternativa interativa: abra cada notebook no Jupyter e rode celula a celula. Util para debugar a primeira vez.
 
 ### Saida esperada por notebook
 
-Para `02_tfidf_logreg`:
+Para `11_tfidf_logreg`:
 
 ```
 artifacts/runs/
@@ -158,7 +160,7 @@ artifacts/runs/
     tfidf_logreg_multiclass_test_set/
 ```
 
-8 diretorios por notebook; 24 no total apos 02+03+04.
+8 diretorios por notebook; 24 no total apos 11+12+13.
 
 ### Como saber se deu certo
 
@@ -218,19 +220,19 @@ My Drive/
 
 ### 5.3 Push do branch para o GitHub
 
-O notebook 05 clona o repositorio durante o bootstrap. Garanta que sua branch esta no GitHub:
+O notebook 21 clona o repositorio durante o bootstrap. Garanta que sua branch esta no GitHub:
 
 ```bash
 git push origin main
 ```
 
-Ou ajuste `REPO_BRANCH` na celula de bootstrap do notebook 05 se voce esta numa branch alternativa.
+Ou ajuste `REPO_BRANCH` na celula de bootstrap do notebook 21 se voce esta numa branch alternativa.
 
 ### 5.4 Abrir o notebook no Colab
 
 1. [colab.research.google.com](https://colab.research.google.com) > Arquivo > Abrir notebook > GitHub
 2. Cole `https://github.com/almeidadm/economy-classifier`
-3. Selecione `notebooks/05_bert_colab.ipynb`
+3. Selecione `notebooks/21_bert.ipynb`
 
 ### 5.5 Selecionar GPU A100
 
@@ -300,14 +302,14 @@ Artefatos extraidos em: artifacts/runs/
 
 **Objetivo**: combinar predicoes dos 6 modelos com 4 estrategias de ensemble (E1-E4) e produzir a tabela final.
 
-### 6.1 Ensembles (notebook 07)
+### 6.1 Ensembles (notebook 43)
 
 ```bash
-uv run jupyter notebook notebooks/07_ensemble.ipynb
+uv run jupyter notebook notebooks/43_ensemble.ipynb
 # Run all cells
 ```
 
-O notebook 07 le os `result_card.json` da pasta `artifacts/runs/` (todos os 6 modelos x regime `test_set`), aplica:
+O notebook 43 le os `result_card.json` da pasta `artifacts/runs/` (todos os 6 modelos x regime `test_set`), aplica:
 
 - **E1**: Votacao majoritaria (limiares >=4/6, >=5/6, >=6/6)
 - **E2**: Votacao ponderada por F1 da validacao
@@ -316,16 +318,16 @@ O notebook 07 le os `result_card.json` da pasta `artifacts/runs/` (todos os 6 mo
 
 Saida em `artifacts/runs/ensemble_*/`.
 
-### 6.2 Tabela comparativa final (notebook 12)
+### 6.2 Tabela comparativa final (notebook 42)
 
 ```bash
-uv run jupyter notebook notebooks/12_comparacao.ipynb
+uv run jupyter notebook notebooks/42_comparacao.ipynb
 # Run all cells
 ```
 
 Agrega todos os `result_card.json` em uma tabela unica com colunas: `model_id, task, regime, primary, train_s, inf_s, size_mb, n_parameters, search_s, n_trials`. Exporta CSV + figuras (barplot comparativo, heatmap de concordancia, frente de Pareto custo-beneficio).
 
-> Se o notebook 12 ainda nao existe, ele esta na lista de pendencias. Voce pode produzir uma tabela ad-hoc com:
+> Se o notebook 42 ainda nao existe, ele esta na lista de pendencias. Voce pode produzir uma tabela ad-hoc com:
 > ```bash
 > uv run python -c "
 > import json
@@ -450,14 +452,14 @@ index,y_true,y_pred,y_score,method
 
 **Nao**. O protocolo definido em `CLAUDE.md` exige `RandomizedSearchCV` antes dos 3 regimes para todos os modelos. Cards sem `hyperparameter_search` nao devem entrar na tabela final.
 
-Se voce quer **debugar** sem rodar a busca: edite `N_ITER_BINARY=2`, `N_ITER_MULTI=2`, `CV_INNER_SPLITS=2` na celula 1 do notebook 02 (e similar para 03/04/05). Vai rodar em segundos. **Nao publique resultados desse modo**.
+Se voce quer **debugar** sem rodar a busca: edite `N_ITER_BINARY=2`, `N_ITER_MULTI=2`, `CV_INNER_SPLITS=2` na celula 1 do notebook 11 (e similar para 12/13/21). Vai rodar em segundos. **Nao publique resultados desse modo**.
 
 ### Posso rodar BERT em T4 ao inves de A100?
 
 Sim, mas:
 - Reduza `N_ITER_BERT` para 5-10 (default 25)
 - Ou comente modelos em `MODELS = [("bertimbau", ...)]`
-- Ou rode so `binary` (comente as celulas multiclasse no notebook 05)
+- Ou rode so `binary` (comente as celulas multiclasse no notebook 21)
 
 Cada uma dessas mitigacoes deve ser **declarada** na sessao de discussao do artigo como limitacao do orcamento computacional.
 
