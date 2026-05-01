@@ -507,8 +507,7 @@ A tabela tem uma linha por metodo/ensemble e as seguintes colunas:
 | `13_tfidf_multinomialnb.ipynb` | Search + 6 regimes | M3 |
 | `21_bert.ipynb` | 3 modelos BERT x 6 regimes (config fixa da literatura) | M4a/M4b/M4c |
 | `31_llm_hf.ipynb` | 2 LLMs x 2 tarefas x 2 estrategias (zero/few-shot) | LLMs |
-| `41_eda_resultados.ipynb` | EDA dos `result_card.json` e `predictions.csv` | — |
-| `42_comparacao.ipynb` | (reservado) Tabela final do artigo + McNemar | Todos |
+| `41_eda_resultados.ipynb` | EDA dos `result_card.json` e `predictions.csv` + tabela final consolidada (CSV) + McNemar pareado com Bonferroni | Todos |
 | `43_ensemble.ipynb` | Voting + stacking sobre os 4 modelos base | E1-E4 |
 | `91_smoke_multiclasse_tfidf.ipynb` | Smoke da Fase 1 (auditoria do pivot multiclasse) | — |
 

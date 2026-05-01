@@ -158,7 +158,9 @@ def build_result_card(
 ) -> dict:
     """Standardized result card for cross-model comparison.
 
-    All notebooks emit this JSON so notebook 42 can aggregate without per-model logic.
+    All notebooks emit this JSON so the aggregation cells at the end of
+    ``41_eda_resultados.ipynb`` (sections 13-14: comparison_table.csv + pairwise
+    McNemar) can build the final-table artifacts without per-model logic.
     The optional ``hyperparameter_search`` field carries the
     :meth:`SearchResult.card_payload` from a preceding RandomizedSearchCV run.
     """

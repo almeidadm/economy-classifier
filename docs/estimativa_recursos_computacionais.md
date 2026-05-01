@@ -392,7 +392,7 @@ BertTrainingConfig(
 1. Executar notebooks 01, 11, 12, 13 primeiro (TF-IDF) — ~15 min total. Isso valida todo o pipeline sem depender da GPU.
 2. Executar `21_bert.ipynb` para os 3 BERTs (um por sessao se necessario), verificando estabilidade.
 3. Executar `31_llm_hf.ipynb` para LLMs (zero-shot + few-shot).
-4. Executar `41_eda_resultados.ipynb`, `42_comparacao.ipynb` (reservado) e `43_ensemble.ipynb` por ultimo.
+4. Executar `41_eda_resultados.ipynb` (inclui tabela final + McNemar pareado) e `43_ensemble.ipynb` por ultimo.
 
 ### 6.3 Monitoramento durante treino BERT
 

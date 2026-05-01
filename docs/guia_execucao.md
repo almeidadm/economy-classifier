@@ -27,9 +27,8 @@ Documento pratico para conduzir uma rodada completa do pipeline (search + 3 regi
 │                                                                      │
 │   ETAPA 4 (LOCAL)                                                    │
 │   31_llm_hf             →  8 result_cards (2 LLMs x 2 tasks x 2)     │
-│   41_eda_resultados     →  EDA dos result_cards e predictions        │
+│   41_eda_resultados     →  EDA + tabela final + McNemar (Bonferroni) │
 │   43_ensemble           →  4 ensembles (E1-E4) sobre o test_set      │
-│   42_comparacao         →  tabela final (todos x todos os regimes)   │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 
@@ -318,36 +317,21 @@ O notebook 43 le os `result_card.json` da pasta `artifacts/runs/` (todos os 6 mo
 
 Saida em `artifacts/runs/ensemble_*/`.
 
-### 6.2 Tabela comparativa final (notebook 42)
+### 6.2 Tabela comparativa final + McNemar (notebook 41, seções 13-14)
 
 ```bash
-uv run jupyter notebook notebooks/42_comparacao.ipynb
-# Run all cells
+uv run jupyter notebook notebooks/41_eda_resultados.ipynb
+# Run all cells (sections 13 e 14 ficam no final)
 ```
 
-Agrega todos os `result_card.json` em uma tabela unica com colunas: `model_id, task, regime, primary, train_s, inf_s, size_mb, n_parameters, search_s, n_trials`. Exporta CSV + figuras (barplot comparativo, heatmap de concordancia, frente de Pareto custo-beneficio).
+A **seção 13** agrega todos os `result_card.json` em uma tabela única com colunas: `model_id, task, regime, primary, train_s, inf_s, size_mb, n_parameters, search_s, n_trials`. `primary` é `f1` para tarefa binária e `macro_f1` para multiclasse. Exporta `comparison_table.csv` em `artifacts/figures/tables_eda/` (local) ou `My Drive/economy-classifier/figures/tables_eda/` (Colab).
 
-> Se o notebook 42 ainda nao existe, ele esta na lista de pendencias. Voce pode produzir uma tabela ad-hoc com:
-> ```bash
-> uv run python -c "
-> import json
-> from pathlib import Path
-> import pandas as pd
-> rows = []
-> for card in Path('artifacts/runs').glob('*/result_card.json'):
->     c = json.loads(card.read_text())
->     m = c['metrics']
->     primary = m.get('f1') or m.get('f1_mean') or m.get('macro_f1') or m.get('macro_f1_mean')
->     rows.append({
->         'model_id': c['model_id'], 'task': c['task'], 'regime': c['regime'],
->         'primary': primary,
->         'train_s': c['cost'].get('train_seconds_mean'),
->         'size_mb': c['cost'].get('model_size_mb'),
->     })
-> pd.DataFrame(rows).sort_values(['task','regime','primary'], ascending=[True,True,False]).to_csv('tabela_final.csv', index=False)
-> print('Salvo em tabela_final.csv')
-> "
-> ```
+A **seção 14** roda McNemar pareado com correção de Bonferroni em duas famílias separadas para evitar mistura de coberturas (ver `CLAUDE.md`):
+
+- `mcnemar_full_coverage.csv` — TF-IDF + BERT no test_set completo (~16.6k amostras).
+- `mcnemar_with_llms.csv` — todos os métodos restritos à interseção de índices com cobertura LLM (~200 amostras).
+
+Os comparativos visuais (barplot, heatmap de concordância Cohen's Kappa, frente de Pareto custo-qualidade) ficam nas seções 2-12 do mesmo notebook.
 
 ---
 

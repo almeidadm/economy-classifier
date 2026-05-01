@@ -198,8 +198,7 @@ Os artefatos ficam em `artifacts/runs/`, no formato padrao do projeto. Os notebo
 Com os artefatos BERT integrados, prossiga com os notebooks restantes:
 
 ```
-41_eda_resultados.ipynb       → EDA dos result_cards
-42_comparacao.ipynb           → Tabela final do artigo (reservado)
+41_eda_resultados.ipynb       → EDA + tabela final do artigo + McNemar pareado (Bonferroni)
 43_ensemble.ipynb             → Voting + stacking sobre os 4 modelos base
 ```
 

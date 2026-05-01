@@ -38,8 +38,7 @@ economy-classifier/
         13_tfidf_multinomialnb  #   TF-IDF M3: search + 6 regimes
         21_bert                 #   BERT M4a/M4b/M4c: 6 regimes (Google Colab L4/A100)
         31_llm_hf               #   LLMs Qwen/Mistral: zero-shot + few-shot, binario + multi
-        41_eda_resultados       #   EDA dos result_cards e predictions
-        42_comparacao           #   (reservado) Tabela final do artigo + McNemar
+        41_eda_resultados       #   EDA + tabela final do artigo + McNemar (Bonferroni)
         43_ensemble             #   Voting + stacking sobre os 4 modelos base
         91_smoke_multiclasse_tfidf   # Smoke da Fase 1 (auditoria) — TF-IDF native vs OvR
     scripts/                    # Utilidades

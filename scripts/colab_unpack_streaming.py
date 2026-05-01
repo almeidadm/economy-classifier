@@ -10,8 +10,8 @@ all chunks would materialise tens of GB of files we never consume downstream
 This script:
 
 1. Walks each zip's central directory without loading payloads into memory.
-2. Applies a whitelist/blacklist matching what notebooks 43_ensemble and
-   42_comparacao actually read (result_card.json, predictions.csv, etc.).
+2. Applies a whitelist/blacklist matching what notebooks 41_eda_resultados
+   and 43_ensemble actually read (result_card.json, predictions.csv, etc.).
 3. Streams allowed entries with ``shutil.copyfileobj`` in 1 MiB chunks so
    peak RAM stays under ~50 MB regardless of zip or file size.
 4. Validates the zip (CRC + extraction count) before optionally deleting it
