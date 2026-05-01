@@ -23,7 +23,7 @@ Documento pratico para conduzir uma rodada completa do pipeline (search + 3 regi
 │   ETAPA 3 (COLAB A100)                                               │
 │   colab_pack.py         →  colab_splits.zip  (upload pro Drive)      │
 │   21_bert               →  18 result_cards + 6 search logs (M4a/b/c) │
-│   colab_unpack.py       →  integra resultados localmente             │
+│   colab_unpack_streaming →  integra resultados localmente            │
 │                                                                      │
 │   ETAPA 4 (LOCAL)                                                    │
 │   31_llm_hf             →  8 result_cards (2 LLMs x 2 tasks x 2)     │
@@ -270,12 +270,12 @@ Os resultados ja salvos nao serao retreinados (cada `run_full_protocol` cria dir
 
 ### 5.8 Baixar resultados (apos conclusao)
 
-No Drive, navegue ate `My Drive/economy-classifier/runs/`. Selecione todos os diretorios `bert_*` e baixe como zip (Drive faz isso automaticamente). Salve como `colab_bert_results.zip` na sua maquina.
+No Drive, navegue ate `My Drive/economy-classifier/runs/`. Selecione todos os diretorios `bert_*` e baixe — para pastas grandes o Drive divide em multiplos zips `runs-*-XXX.zip`. Salve todos em `~/Downloads/`.
 
 ### 5.9 Integrar localmente (LOCAL, ~30s)
 
 ```bash
-uv run python scripts/colab_unpack.py ~/Downloads/colab_bert_results.zip
+uv run python scripts/colab_unpack_streaming.py --delete-after
 ```
 
 Saida esperada:

@@ -33,7 +33,7 @@ LOCAL                           COLAB                           LOCAL
    (gerar splits)                  21_bert.ipynb                   do Drive
         │                              │
         ▼                              ▼
-2. colab_pack.py                4. Treinar M4a, M4b, M4c       7. colab_unpack.py
+2. colab_pack.py                4. Treinar M4a, M4b, M4c       7. colab_unpack_streaming
    (gerar zip)                     (GPU T4)                        (integrar artefatos)
         │                              │
         ▼                              ▼                              │
@@ -168,24 +168,28 @@ My Drive/
         ...
 ```
 
-Baixe o `colab_bert_results.zip` do Google Drive para a maquina local.
+Baixe os zips `runs-*-XXX.zip` do Google Drive para `~/Downloads/`.
 
 ### Passo 9 — Integrar resultados ao repositorio (local)
 
 ```bash
-uv run python scripts/colab_unpack.py ~/Downloads/colab_bert_results.zip
+# Inspecao previa (nao escreve em disco)
+uv run python scripts/colab_unpack_streaming.py --dry-run
+
+# Extracao seletiva (filtra checkpoints/, model/*.safetensors, tokenizer)
+uv run python scripts/colab_unpack_streaming.py --delete-after
 ```
 
-Saida esperada:
+Saida esperada (resumo final):
 
 ```
-Runs encontrados no zip: 3
-  - {timestamp}-bert-training-bertimbau
-  - {timestamp}-bert-training-finbert-ptbr
-  - {timestamp}-bert-training-deb3rta-base
-
-Artefatos extraidos em: /path/to/economy-classifier/artifacts/runs/
+Zips processados com sucesso: N
+Total extraido: M arquivos, X.X MiB
+Total result_card.json: K
+Total predictions.csv:  K
 ```
+
+O script auto-descobre zips em `~/Downloads/` (ajustavel via `--zips-dir`) e escreve em `artifacts/runs/`. Veja a docstring do script para flags adicionais (`--pattern`, `--keep-tfidf-joblib`, `--continue-on-error`).
 
 Os artefatos ficam em `artifacts/runs/`, no formato padrao do projeto. Os notebooks 41 (EDA), 42 (tabela final, reservado) e 43 (ensemble) podem carrega-los para a avaliacao comparativa final.
 
@@ -310,7 +314,7 @@ DeB3RTa-base usa tokenizer SentencePiece (DeBERTa-v2). No Colab, instale com `pi
 | Arquivo | Descricao |
 |---------|-----------|
 | `scripts/colab_pack.py` | Empacota splits para upload ao Colab |
-| `scripts/colab_unpack.py` | Integra resultados do Colab ao repositorio local |
+| `scripts/colab_unpack_streaming.py` | Integra resultados do Colab ao repositorio local (multi-zip, streaming, seletivo) |
 | `notebooks/21_bert.ipynb` | Notebook de treino para Google Colab |
 | `src/economy_classifier/bert.py` | Modulo de treino e inferencia BERT |
 | `docs/estimativa_recursos_computacionais.md` | Estimativas detalhadas de tempo e recursos |

@@ -44,7 +44,7 @@ economy-classifier/
         91_smoke_multiclasse_tfidf   # Smoke da Fase 1 (auditoria) — TF-IDF native vs OvR
     scripts/                    # Utilidades
         colab_pack.py           #   Empacotar splits para upload ao Colab
-        colab_unpack.py         #   Integrar resultados do Colab localmente
+        colab_unpack_streaming.py #   Integrar resultados do Colab (multi-zip, streaming)
     docs/                       # Documentacao
         arquitetura.md          #   Estrutura de modulos e fluxo de dados
         estimativa_recursos_computacionais.md
@@ -98,8 +98,8 @@ uv run python scripts/colab_pack.py
 # 3. Abrir notebooks/21_bert.ipynb no Colab (Runtime > A100)
 # 4. Executar (search + 6 regimes x 3 modelos ~ 1-3 dias em A100)
 
-# 5. Baixar resultados e integrar
-uv run python scripts/colab_unpack.py colab_bert_results.zip
+# 5. Baixar zips do Drive para ~/Downloads/ e integrar
+uv run python scripts/colab_unpack_streaming.py --delete-after
 ```
 
 ## Protocolo experimental
