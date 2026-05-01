@@ -1,0 +1,17 @@
+# BRACIS / STIL — Submission Draft
+
+## Title
+
+**Detecting Economic News in Brazilian Portuguese: A Cost-Aware Comparison of TF-IDF, BERT, and Large Language Models**
+
+## Abstract
+
+Identifying economic and financial content in news streams is a recurring need in finance, policy monitoring, and computational social science, yet for Brazilian Portuguese it is still tackled with ad-hoc pipelines and rarely compared head-to-head across modeling paradigms. This work presents a methodologically tight comparative framework for classifying *Folha de São Paulo* articles, with the **economic class (`mercado`) as the central target**. The primary formulation is a binary task — **economic vs. non-economic** — calibrated on the natural class distribution (~12.5% positives), where accuracy is misleading and F1 / AUC-ROC are the meaningful signals. A parallel multiclass formulation over seven editorial sections plus an *other* class situates the economic class against its main editorial competitors (notably `colunas`, the heterogeneous opinion section that is the dominant source of confusion with economic content). We compare TF-IDF baselines (Logistic Regression, Linear SVC, Multinomial NB), domain-specialized BERT encoders (BERTimbau, **FinBERT-PT-BR** — pre-trained on Brazilian financial corpora — and DeB3RTa), and instruction-tuned LLMs (Mistral-7B, Qwen2.5, Llama-3.1) under zero-shot and few-shot prompting. All methods share identical 80/10/10 stratified splits — with a test set never touched during tuning — and are additionally evaluated via 5-fold cross-validation to report variance. TF-IDF families undergo `RandomizedSearchCV` (60 trials); BERT uses literature-grounded fixed hyperparameters as a declared exception, justified by cost. We report F1 / macro-F1, AUC-ROC, McNemar pairwise tests, ensemble strategies (voting, stacking on validation to avoid leakage), inter-method agreement (Fleiss' κ), and a standardized cost panel (training time, inference throughput, model size, parameter count). The contribution is twofold: (i) the first cost-aware, statistically-controlled benchmark for **economic news detection in Brazilian Portuguese**, including a financial-domain BERT and modern open-weight LLMs; and (ii) practical deployment guidance — when a TF-IDF model suffices, when FinBERT-PT-BR's domain pretraining pays off, and when LLM prompting is (or is not) worth its inference cost.
+
+---
+
+## Notes for the author
+
+- **Venue fit.** STIL is the strongest fit (Portuguese NLP, comparative methodology). If targeting BRACIS' main track, reframe the contribution as ML methodology (rigorous benchmarking under cost constraints) and de-emphasize the language angle.
+- **Results-agnostic by design.** The abstract reports no F1 numbers because the final comparison table (`42_comparacao`) is not yet aggregated. Before submission, add one or two headline findings — e.g., "FinBERT-PT-BR matches Mistral-7B few-shot at 1/40 the inference cost" — which is typically what gets a STIL abstract accepted.
+- **Construct validity caveat.** The `mercado` label is editorial, not a linguistic annotation of economic content. This limitation is documented in `CLAUDE.md` and should be acknowledged in the paper's methodology section, but is omitted from the abstract for brevity.
