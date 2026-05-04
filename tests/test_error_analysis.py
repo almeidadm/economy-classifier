@@ -12,8 +12,11 @@ from economy_classifier.error_analysis import (
     build_binary_error_pool,
     build_disagreement_pool,
     build_multiclass_error_pool,
+    cross_binary_multiclass_errors_for_class,
     detect_task,
     export_annotation_template,
+    filter_disagreement_by_true_class,
+    hard_examples_for_class,
     load_annotated_sample,
     load_predictions_with_text,
     stratified_error_sample,
@@ -456,3 +459,207 @@ def test_annotation_constants_match_summary_logic():
     not_model = {"rotulagem_editorial", "tema_misto", "ambiguo"}
     model = {"modelo_erra"}
     assert set(ANNOTATION_TYPES) == not_model | model
+
+
+# ---------------------------------------------------------------------------
+# cross_binary_multiclass_errors_for_class
+# ---------------------------------------------------------------------------
+
+
+def test_cross_binary_multiclass_errors_filters_to_target_class(
+    binary_predictions, multiclass_predictions, test_corpus,
+):
+    binary_joined = load_predictions_with_text(binary_predictions, test_corpus)
+    multi_joined = load_predictions_with_text(multiclass_predictions, test_corpus)
+    out = cross_binary_multiclass_errors_for_class(
+        binary_joined, multi_joined, target_class="mercado",
+    )
+    # 1001 (TP binary, correct multi) and 1002 (FN binary, correct multi)
+    # are the only rows where y_true_binary==1 AND y_true_multi=='mercado'.
+    assert set(out["index"]) == {1001, 1002}
+    assert (out["y_true_binary"] == 1).all()
+    assert (out["y_true_multi"] == "mercado").all()
+
+
+def test_cross_binary_multiclass_errors_agreement_patterns(test_corpus):
+    # Synthetic predictions covering all 4 patterns, all on mercado items.
+    # Use the existing mercado items (1001, 1002) plus two extras within the
+    # corpus where label==1 — but the fixture only has 1001/1002 as mercado,
+    # so we pad by re-using indices with custom (binary, multi) outcomes.
+    binary = pd.DataFrame([
+        {"index": 1001, "y_true": 1, "y_pred": 1, "y_score": 0.9, "method": "m"},  # bin OK
+        {"index": 1002, "y_true": 1, "y_pred": 0, "y_score": 0.3, "method": "m"},  # bin wrong
+    ])
+    multi = pd.DataFrame([
+        {"index": 1001, "y_true": "mercado", "y_pred": "mercado", "method": "m"},  # multi OK
+        {"index": 1002, "y_true": "mercado", "y_pred": "poder", "method": "m"},    # multi wrong
+    ])
+    bj = load_predictions_with_text(binary, test_corpus)
+    mj = load_predictions_with_text(multi, test_corpus)
+    out = cross_binary_multiclass_errors_for_class(bj, mj, target_class="mercado")
+    by_idx = out.set_index("index")
+    assert by_idx.loc[1001, "agreement_pattern"] == "both_correct"
+    assert by_idx.loc[1002, "agreement_pattern"] == "both_wrong"
+
+    # Now flip: 1001 binary correct, multi wrong → binary_only_correct
+    #          1002 binary wrong, multi correct → multi_only_correct
+    multi2 = pd.DataFrame([
+        {"index": 1001, "y_true": "mercado", "y_pred": "poder", "method": "m"},
+        {"index": 1002, "y_true": "mercado", "y_pred": "mercado", "method": "m"},
+    ])
+    mj2 = load_predictions_with_text(multi2, test_corpus)
+    out2 = cross_binary_multiclass_errors_for_class(bj, mj2, target_class="mercado")
+    by_idx2 = out2.set_index("index")
+    assert by_idx2.loc[1001, "agreement_pattern"] == "binary_only_correct"
+    assert by_idx2.loc[1002, "agreement_pattern"] == "multi_only_correct"
+
+
+def test_cross_binary_multiclass_errors_handles_missing_indices(test_corpus):
+    binary = pd.DataFrame([
+        {"index": 1001, "y_true": 1, "y_pred": 1, "y_score": 0.9, "method": "m"},
+        {"index": 1002, "y_true": 1, "y_pred": 0, "y_score": 0.3, "method": "m"},
+    ])
+    multi = pd.DataFrame([
+        # Only 1001 — 1002 is missing on the multiclass side
+        {"index": 1001, "y_true": "mercado", "y_pred": "mercado", "method": "m"},
+    ])
+    bj = load_predictions_with_text(binary, test_corpus)
+    mj = load_predictions_with_text(multi, test_corpus)
+    out = cross_binary_multiclass_errors_for_class(bj, mj, target_class="mercado")
+    assert set(out["index"]) == {1001}
+    assert out.attrs["n_dropped_binary_only"] == 1
+    assert out.attrs["n_dropped_multi_only"] == 0
+
+
+# ---------------------------------------------------------------------------
+# filter_disagreement_by_true_class
+# ---------------------------------------------------------------------------
+
+
+def test_filter_disagreement_by_true_class_binary(test_corpus):
+    pred_a = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "a"},  # mercado wrong
+        {"index": 1003, "y_true": 0, "y_pred": 1, "method": "a"},  # colunas wrong
+    ])
+    pred_b = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "b"},  # mercado wrong
+        {"index": 1003, "y_true": 0, "y_pred": 0, "method": "b"},  # colunas right
+    ])
+    pool = build_disagreement_pool({"a": pred_a, "b": pred_b}, test_corpus)
+    filtered = filter_disagreement_by_true_class(pool, target_class=1)
+    assert set(filtered["index"]) == {1002}
+    assert (filtered["y_true"] == 1).all()
+
+
+def test_filter_disagreement_by_true_class_multiclass(test_corpus):
+    pred_a = pd.DataFrame([
+        {"index": 1002, "y_true": "mercado", "y_pred": "poder", "method": "a"},
+        {"index": 1003, "y_true": "colunas", "y_pred": "mercado", "method": "a"},
+    ])
+    pred_b = pd.DataFrame([
+        {"index": 1002, "y_true": "mercado", "y_pred": "cotidiano", "method": "b"},
+        {"index": 1003, "y_true": "colunas", "y_pred": "colunas", "method": "b"},
+    ])
+    pool = build_disagreement_pool({"a": pred_a, "b": pred_b}, test_corpus)
+    filtered = filter_disagreement_by_true_class(pool, target_class="mercado")
+    assert set(filtered["index"]) == {1002}
+    assert (filtered["y_true"] == "mercado").all()
+
+
+# ---------------------------------------------------------------------------
+# hard_examples_for_class
+# ---------------------------------------------------------------------------
+
+
+def test_hard_examples_for_class_returns_only_all_wrong(test_corpus):
+    # 3 methods. Index 1002 (mercado, y_true=1): all three predict 0 → all_wrong
+    # Index 1003 (colunas, y_true=0): all three predict 1 → all_wrong but y_true!=1
+    # Index 1004 (colunas, y_true=0): mixed → not all_wrong
+    pred_a = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "a"},
+        {"index": 1003, "y_true": 0, "y_pred": 1, "method": "a"},
+        {"index": 1004, "y_true": 0, "y_pred": 1, "method": "a"},
+    ])
+    pred_b = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "b"},
+        {"index": 1003, "y_true": 0, "y_pred": 1, "method": "b"},
+        {"index": 1004, "y_true": 0, "y_pred": 0, "method": "b"},
+    ])
+    pred_c = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "c"},
+        {"index": 1003, "y_true": 0, "y_pred": 1, "method": "c"},
+        {"index": 1004, "y_true": 0, "y_pred": 1, "method": "c"},
+    ])
+    hard = hard_examples_for_class(
+        {"a": pred_a, "b": pred_b, "c": pred_c}, test_corpus, target_class=1,
+    )
+    assert set(hard["index"]) == {1002}
+    assert (hard["disagreement_pattern"] == "all_wrong").all()
+    assert (hard["y_true"] == 1).all()
+
+
+def test_hard_examples_for_class_empty_when_at_least_one_method_correct(test_corpus):
+    pred_a = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 1, "method": "a"},  # one correct
+    ])
+    pred_b = pd.DataFrame([
+        {"index": 1002, "y_true": 1, "y_pred": 0, "method": "b"},
+    ])
+    hard = hard_examples_for_class(
+        {"a": pred_a, "b": pred_b}, test_corpus, target_class=1,
+    )
+    assert hard.empty
+
+
+# ---------------------------------------------------------------------------
+# stratified_error_sample with dict n_per_stratum
+# ---------------------------------------------------------------------------
+
+
+def test_stratified_error_sample_accepts_dict_n_per_stratum(
+    binary_predictions, test_corpus,
+):
+    joined = load_predictions_with_text(binary_predictions, test_corpus)
+    errors = build_binary_error_pool(joined)
+    # Pool: 3 FPs + 1 FN. Asymmetric request: 1 FP + 2 FN (FN capped at 1).
+    sample = stratified_error_sample(
+        errors, n_per_stratum={"FP": 1, "FN": 2}, stratify_by="error_type",
+    )
+    counts = sample["error_type"].value_counts().to_dict()
+    assert counts.get("FP") == 1
+    assert counts.get("FN") == 1  # capped at stratum size
+
+
+def test_stratified_error_sample_dict_skips_missing_strata(
+    binary_predictions, test_corpus,
+):
+    joined = load_predictions_with_text(binary_predictions, test_corpus)
+    errors = build_binary_error_pool(joined)
+    # Only ask for FN — FP stratum should be skipped silently and recorded.
+    sample = stratified_error_sample(
+        errors, n_per_stratum={"FN": 5}, stratify_by="error_type",
+    )
+    assert set(sample["error_type"]) == {"FN"}
+    assert "FP" in sample.attrs.get("skipped_strata", [])
+
+
+def test_stratified_error_sample_dict_keeps_legacy_int_behavior(
+    binary_predictions, test_corpus,
+):
+    joined = load_predictions_with_text(binary_predictions, test_corpus)
+    errors = build_binary_error_pool(joined)
+    int_sample = stratified_error_sample(errors, n_per_stratum=2, seed=DEFAULT_SEED)
+    # Equivalent dict request — same seed should yield the same selection set.
+    dict_sample = stratified_error_sample(
+        errors, n_per_stratum={"FP": 2, "FN": 2}, seed=DEFAULT_SEED,
+    )
+    assert set(int_sample["index"]) == set(dict_sample["index"])
+
+
+def test_stratified_error_sample_rejects_empty_dict(
+    binary_predictions, test_corpus,
+):
+    joined = load_predictions_with_text(binary_predictions, test_corpus)
+    errors = build_binary_error_pool(joined)
+    with pytest.raises(ValueError, match="empty"):
+        stratified_error_sample(errors, n_per_stratum={}, stratify_by="error_type")

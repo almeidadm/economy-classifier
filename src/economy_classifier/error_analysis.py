@@ -224,6 +224,132 @@ def build_disagreement_pool(
     return base.reset_index(drop=True)
 
 
+def cross_binary_multiclass_errors_for_class(
+    binary_joined: pd.DataFrame,
+    multiclass_joined: pd.DataFrame,
+    *,
+    target_class: str = "mercado",
+    binary_positive_label: int = 1,
+    text_columns: Sequence[str] = ("title", "text", "category", "subcategory", "date", "link"),
+) -> pd.DataFrame:
+    """Link binary and multiclass predictions on shared indices for a target class.
+
+    Filters to rows where ``y_true_binary == binary_positive_label`` **and**
+    ``y_true_multi == target_class`` — i.e., news items that genuinely belong
+    to the target class. For each such index computes whether each pipeline
+    got it right and tags the row with an ``agreement_pattern`` ∈
+    ``{'both_correct', 'both_wrong', 'binary_only_correct', 'multi_only_correct'}``.
+
+    Answers: "are the multiclass errors the same as the binary errors?". A
+    row with ``binary_only_correct`` is a case where the binary head said
+    ``mercado`` but the multiclass head sent the article elsewhere — and vice
+    versa for ``multi_only_correct``. ``both_wrong`` is the genuinely hard
+    overlap between the two pipelines.
+
+    Inner-joins on ``index``: indices missing from either side are dropped
+    (count surfaced via ``attrs['n_dropped_binary_only']`` and
+    ``attrs['n_dropped_multi_only']``).
+    """
+    if detect_task(binary_joined) != "binary":
+        raise ValueError("binary_joined must be a binary task")
+    if detect_task(multiclass_joined) != "multiclass":
+        raise ValueError("multiclass_joined must be a multiclass task")
+
+    binary_idx = set(binary_joined["index"])
+    multi_idx = set(multiclass_joined["index"])
+    n_binary_only = len(binary_idx - multi_idx)
+    n_multi_only = len(multi_idx - binary_idx)
+
+    binary_slim = binary_joined[["index", "y_true", "y_pred"]].rename(columns={
+        "y_true": "y_true_binary", "y_pred": "y_pred_binary",
+    })
+    multi_slim = multiclass_joined[["index", "y_true", "y_pred"]].rename(columns={
+        "y_true": "y_true_multi", "y_pred": "y_pred_multi",
+    })
+    merged = binary_slim.merge(
+        multi_slim, on="index", how="inner", validate="one_to_one",
+    )
+
+    mask_target = (
+        (merged["y_true_binary"].astype(int) == int(binary_positive_label))
+        & (merged["y_true_multi"].astype(str) == str(target_class))
+    )
+    merged = merged[mask_target].copy()
+
+    merged["binary_correct"] = (
+        merged["y_pred_binary"].astype(int) == merged["y_true_binary"].astype(int)
+    )
+    merged["multi_correct"] = (
+        merged["y_pred_multi"].astype(str) == merged["y_true_multi"].astype(str)
+    )
+
+    pattern = pd.Series("both_correct", index=merged.index, dtype="object")
+    pattern[~merged["binary_correct"] & ~merged["multi_correct"]] = "both_wrong"
+    pattern[merged["binary_correct"] & ~merged["multi_correct"]] = "binary_only_correct"
+    pattern[~merged["binary_correct"] & merged["multi_correct"]] = "multi_only_correct"
+    merged["agreement_pattern"] = pattern
+
+    text_cols_present = [c for c in text_columns if c in binary_joined.columns]
+    if text_cols_present:
+        text_subset = (
+            binary_joined[["index", *text_cols_present]]
+            .drop_duplicates("index", keep="first")
+        )
+        merged = merged.merge(
+            text_subset, on="index", how="left", validate="one_to_one",
+        )
+
+    out = merged.reset_index(drop=True)
+    out.attrs["n_dropped_binary_only"] = n_binary_only
+    out.attrs["n_dropped_multi_only"] = n_multi_only
+    return out
+
+
+def filter_disagreement_by_true_class(
+    disagreement_pool: pd.DataFrame,
+    *,
+    target_class: str | int,
+    y_true_column: str = "y_true",
+) -> pd.DataFrame:
+    """Restrict a disagreement pool to rows whose ``y_true`` equals ``target_class``.
+
+    Works for both binary (``target_class=1``) and multiclass
+    (``target_class="mercado"``) — comparison is done on string-cast values
+    so int/str labels mix gracefully. Does not recompute
+    ``disagreement_pattern``; only filters.
+    """
+    if y_true_column not in disagreement_pool.columns:
+        raise KeyError(f"column {y_true_column!r} not in disagreement_pool")
+    mask = disagreement_pool[y_true_column].astype(str) == str(target_class)
+    return disagreement_pool[mask].reset_index(drop=True)
+
+
+def hard_examples_for_class(
+    predictions_by_method: dict[str, pd.DataFrame],
+    test_df: pd.DataFrame,
+    *,
+    target_class: str | int,
+    text_columns: Sequence[str] = ("title", "text", "category", "subcategory", "date", "link"),
+) -> pd.DataFrame:
+    """Rows where ``y_true == target_class`` and **every** method got it wrong.
+
+    Builds a disagreement pool internally and intersects
+    ``disagreement_pattern == 'all_wrong'`` with ``y_true == target_class``.
+    The result surfaces genuinely hard examples — candidates for
+    re-labelling, or evidence that a label is editorially noisy.
+    """
+    pool = build_disagreement_pool(
+        predictions_by_method, test_df, text_columns=text_columns,
+    )
+    if pool.empty:
+        return pool
+    mask = (
+        (pool["disagreement_pattern"] == "all_wrong")
+        & (pool["y_true"].astype(str) == str(target_class))
+    )
+    return pool[mask].reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # Pre-annotation summaries
 # ---------------------------------------------------------------------------
@@ -361,32 +487,66 @@ def summarize_errors_by_date(
 def stratified_error_sample(
     error_pool: pd.DataFrame,
     *,
-    n_per_stratum: int,
+    n_per_stratum: int | dict[str | int, int],
     stratify_by: str = "error_type",
     seed: int = DEFAULT_SEED,
 ) -> pd.DataFrame:
     """Draw up to ``n_per_stratum`` rows from each unique value of ``stratify_by``.
 
-    Strata smaller than ``n_per_stratum`` contribute all their rows. The
-    output preserves the input columns and is shuffled deterministically.
+    ``n_per_stratum`` may be:
+
+    - an ``int`` — every stratum gets the same target count (legacy behavior);
+    - a ``dict`` mapping stratum value to count — strata absent from the dict
+      are skipped silently and their values listed in ``attrs['skipped_strata']``.
+      Useful for asymmetric sampling (e.g. ``{"FN": 50, "FP": 30}`` when the
+      analysis foregrounds false negatives).
+
+    Strata smaller than the requested count contribute all their rows. The
+    output is shuffled deterministically with ``seed``.
     """
     if stratify_by not in error_pool.columns:
         raise KeyError(f"column {stratify_by!r} not in error_pool")
-    if n_per_stratum < 1:
-        raise ValueError(f"n_per_stratum must be >= 1, got {n_per_stratum}")
+
+    if isinstance(n_per_stratum, dict):
+        if not n_per_stratum:
+            raise ValueError("n_per_stratum dict cannot be empty")
+        if any(int(n) < 1 for n in n_per_stratum.values()):
+            raise ValueError(
+                f"n_per_stratum values must be >= 1, got {n_per_stratum}"
+            )
+        n_dict: dict | None = dict(n_per_stratum)
+        default_n: int | None = None
+    else:
+        if n_per_stratum < 1:
+            raise ValueError(f"n_per_stratum must be >= 1, got {n_per_stratum}")
+        n_dict = None
+        default_n = int(n_per_stratum)
 
     rng = np.random.RandomState(seed)
     sampled_chunks: list[pd.DataFrame] = []
+    skipped: list[object] = []
     for value, chunk in error_pool.groupby(stratify_by, sort=True):
-        n = min(n_per_stratum, len(chunk))
+        if n_dict is not None:
+            if value not in n_dict:
+                skipped.append(value)
+                continue
+            n_target = int(n_dict[value])
+        else:
+            assert default_n is not None
+            n_target = default_n
+        n = min(n_target, len(chunk))
         idx = rng.choice(len(chunk), size=n, replace=False)
         sampled_chunks.append(chunk.iloc[idx])
 
     if not sampled_chunks:
-        return error_pool.iloc[0:0].copy()
-    out = pd.concat(sampled_chunks, ignore_index=True)
-    shuffle_idx = rng.permutation(len(out))
-    return out.iloc[shuffle_idx].reset_index(drop=True)
+        out = error_pool.iloc[0:0].copy()
+    else:
+        concat = pd.concat(sampled_chunks, ignore_index=True)
+        shuffle_idx = rng.permutation(len(concat))
+        out = concat.iloc[shuffle_idx].reset_index(drop=True)
+    if skipped:
+        out.attrs["skipped_strata"] = skipped
+    return out
 
 
 # ---------------------------------------------------------------------------
