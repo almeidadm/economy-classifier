@@ -28,3 +28,7 @@ CLAUDE.md
 # Colab (gerados por scripts/)
 colab_splits.zip
 colab_bert_results.zip
+colab_ood_data.zip
+
+# OOD eval — symlinks/diretorios runtime criados pelo notebook 45
+ood_data/
