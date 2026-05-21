@@ -104,32 +104,39 @@ def load_recognasumm(root: Path, partition: str = "test") -> pd.DataFrame:
 
     Args:
         root: diretorio com ``test.jsonl`` (e opcionalmente train/validation).
-        partition: ``test`` (default, 27.055 docs), ``train`` ou ``validation``.
+        partition: ``test`` (default, 27.055 docs), ``train``, ``validation``
+            ou ``full`` (concatena train+validation+test, ~150k docs).
 
     Retorna colunas: ``document_id, text, category, autor, url, sumario,
     y_true_binary``.
     """
-    path = root / f"{partition}.jsonl"
-    if not path.exists():
+    parts = ["train", "validation", "test"] if partition == "full" else [partition]
+    missing = [p for p in parts if not (root / f"{p}.jsonl").exists()]
+    if missing:
+        urls = "\n".join(
+            f"  https://huggingface.co/datasets/recogna-nlp/recognasumm/resolve/main/{p}.jsonl"
+            for p in missing
+        )
         raise FileNotFoundError(
-            f"{path} nao encontrado. Baixe via "
-            f"https://huggingface.co/datasets/recogna-nlp/recognasumm/resolve/main/{partition}.jsonl"
+            f"Arquivo(s) ausente(s) em {root}: {missing}. Baixe via:\n{urls}"
         )
 
     rows: list[dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            obj = json.loads(line)
-            rows.append({
-                "document_id": str(obj.get("index", "")),
-                "titulo": obj.get("Titulo", "") or "",
-                "subtitulo": obj.get("Subtitulo", "") or "",
-                "noticia": obj.get("Noticia", "") or "",
-                "category": (obj.get("Categoria", "") or "").strip(),
-                "autor": obj.get("Autor_corrigido") or obj.get("Autor", "") or "",
-                "url": obj.get("URL", "") or "",
-                "sumario": obj.get("Sumario", "") or "",
-            })
+    for part in parts:
+        path = root / f"{part}.jsonl"
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                obj = json.loads(line)
+                rows.append({
+                    "document_id": f"{part}:{obj.get('index', '')}" if partition == "full" else str(obj.get("index", "")),
+                    "titulo": obj.get("Titulo", "") or "",
+                    "subtitulo": obj.get("Subtitulo", "") or "",
+                    "noticia": obj.get("Noticia", "") or "",
+                    "category": (obj.get("Categoria", "") or "").strip(),
+                    "autor": obj.get("Autor_corrigido") or obj.get("Autor", "") or "",
+                    "url": obj.get("URL", "") or "",
+                    "sumario": obj.get("Sumario", "") or "",
+                })
     df = pd.DataFrame(rows)
     df["text"] = [_build_input_text(t, n) for t, n in zip(df["titulo"], df["noticia"], strict=True)]
     df = df[df["text"].str.len() > 0].copy()
@@ -324,9 +331,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recognasumm-root", type=Path,
                         default=DEFAULT_RECOGNASUMM_ROOT,
                         help="Raiz do RecognaSumm com test.jsonl (e opcionais train/validation).")
-    parser.add_argument("--partition", choices=["test", "train", "validation"],
+    parser.add_argument("--partition", choices=["test", "train", "validation", "full"],
                         default="test",
-                        help="Particao a avaliar (default: test, 27.055 docs).")
+                        help="Particao a avaliar (default: test, 27.055 docs; "
+                             "full concatena train+validation+test).")
     parser.add_argument("--output-root", type=Path, default=RUNS_DIR)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
