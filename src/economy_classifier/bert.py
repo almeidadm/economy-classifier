@@ -15,6 +15,8 @@ from transformers import (
     TrainingArguments,
 )
 
+from .text_processing import load_stopwords_pt, strip_stopwords
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -22,6 +24,7 @@ MODEL_REGISTRY = {
     "bertimbau": "neuralmind/bert-base-portuguese-cased",
     "finbert_ptbr": "lucas-leme/FinBERT-PT-BR",
     "deb3rta_base": "higopires/DeB3RTa-base",
+    "norberto_base": "Itau-Unibanco/NorBERTo-base",  # ModernBERT PT-BR; requer transformers>=4.48
 }
 
 LABELS = {0: "outros", 1: "mercado"}
@@ -32,7 +35,7 @@ class BertTrainingConfig:
     """Training configuration for BERT fine-tuning."""
 
     model_name: str = "neuralmind/bert-base-portuguese-cased"
-    max_length: int = 256
+    max_length: int = 500
     learning_rate: float = 2e-5
     per_device_train_batch_size: int = 1
     per_device_eval_batch_size: int = 8
@@ -44,6 +47,7 @@ class BertTrainingConfig:
     early_stopping_patience: int = 1
     save_total_limit: int = 2
     gradient_checkpointing: bool = False
+    remove_stopwords: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -60,6 +64,7 @@ class BertTrainingConfig:
             "early_stopping_patience": self.early_stopping_patience,
             "save_total_limit": self.save_total_limit,
             "gradient_checkpointing": self.gradient_checkpointing,
+            "remove_stopwords": self.remove_stopwords,
         }
 
 
@@ -70,15 +75,25 @@ def _tokenize_dataframe(
     *,
     text_column: str = "text",
     label_column: str = "label",
+    remove_stopwords: bool = False,
 ):
     """Tokenize a DataFrame and return a HuggingFace Dataset.
 
     The ``label_column`` value (already encoded as int when used for multiclass)
     is exposed as ``labels`` to satisfy the HuggingFace Trainer convention.
+
+    When ``remove_stopwords`` is set, PT-BR stopwords are stripped from the raw
+    text *before* subword tokenization (the only injection point available for
+    transformers, which have no ``stop_words`` option). This is methodologically
+    questionable for contextual models — applied only as a declared experimental
+    condition, never the default.
     """
     from datasets import Dataset
 
     texts = df[text_column].fillna("").tolist()
+    if remove_stopwords:
+        stopwords = load_stopwords_pt()
+        texts = [strip_stopwords(text, stopwords) for text in texts]
     labels = df[label_column].tolist()
 
     encodings = tokenizer(
@@ -169,8 +184,14 @@ def train_bert_classifier(
     # (some DeBERTa V2 checkpoints store weights in bf16).
     model.float()
 
-    train_dataset = _tokenize_dataframe(train_df, tokenizer, config.max_length)
-    val_dataset = _tokenize_dataframe(validation_df, tokenizer, config.max_length)
+    train_dataset = _tokenize_dataframe(
+        train_df, tokenizer, config.max_length,
+        remove_stopwords=config.remove_stopwords,
+    )
+    val_dataset = _tokenize_dataframe(
+        validation_df, tokenizer, config.max_length,
+        remove_stopwords=config.remove_stopwords,
+    )
 
     training_args = TrainingArguments(
         output_dir=str(run_path / "checkpoints"),
@@ -271,6 +292,7 @@ class BertMulticlassConfig(BertTrainingConfig):
             "early_stopping_patience": self.early_stopping_patience,
             "save_total_limit": self.save_total_limit,
             "gradient_checkpointing": self.gradient_checkpointing,
+            "remove_stopwords": self.remove_stopwords,
             "label_set": list(self.label_set),
         }
 
@@ -342,9 +364,11 @@ def train_bert_multiclass(
 
     train_dataset = _tokenize_dataframe(
         train_enc, tokenizer, config.max_length, label_column="_label_id",
+        remove_stopwords=config.remove_stopwords,
     )
     val_dataset = _tokenize_dataframe(
         val_enc, tokenizer, config.max_length, label_column="_label_id",
+        remove_stopwords=config.remove_stopwords,
     )
 
     training_args = TrainingArguments(
@@ -438,14 +462,24 @@ def predict_texts(
     *,
     model_dir: str | Path,
     method: str,
-    max_length: int = 256,
+    max_length: int = 500,
     batch_size: int = 16,
+    remove_stopwords: bool = False,
 ) -> pd.DataFrame:
-    """Run batch inference and return standard prediction DataFrame."""
+    """Run batch inference and return standard prediction DataFrame.
+
+    ``remove_stopwords`` must match the value used to train the model at
+    ``model_dir``; otherwise inference texts differ from the training
+    distribution. PT-BR stopwords are stripped before tokenization.
+    """
     import pandas as pd
 
     if batch_size < 1:
         raise ValueError("batch_size must be greater than zero.")
+
+    if remove_stopwords:
+        stopwords = load_stopwords_pt()
+        texts = [strip_stopwords(text, stopwords) for text in texts]
 
     tokenizer, model, device = load_classifier(model_dir)
 

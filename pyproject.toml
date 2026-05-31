@@ -22,7 +22,7 @@ dependencies = [
     "scipy>=1.11",
     "seaborn>=0.13",
     "torch>=2.4",
-    "transformers>=4.45",
+    "transformers>=4.48",
 ]
 
 [project.optional-dependencies]
@@ -51,3 +51,8 @@ extend-exclude = ["notebooks/legacy"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Lista de stopwords PT-BR materializada (ver scripts/generate_stopwords_pt.py),
+# lida em runtime por economy_classifier.text_processing.
+economy_classifier = ["data/*.txt"]

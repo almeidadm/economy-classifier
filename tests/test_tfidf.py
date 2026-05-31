@@ -141,6 +141,37 @@ def test_config_defaults_match_requirements():
     assert cfg.max_df == 0.95
 
 
+def test_remove_stopwords_excludes_them_from_vocabulary(synthetic_corpus, tmp_path):
+    """With the flag on, multi-char PT stopwords must be pruned from the vocab."""
+    train, val, _ = build_train_val_test_split(synthetic_corpus, seed=42)
+    balanced = build_balanced_training_frame(train, seed=42)
+    config = TfidfTrainingConfig(
+        classifier="logreg", max_features=500, min_df=1, remove_stopwords=True,
+    )
+    result = train_tfidf_classifier(balanced, val, run_dir=tmp_path, config=config)
+    vocab = load_tfidf_pipeline(result["model_dir"]).named_steps["tfidf"].vocabulary_
+    for stopword in ("para", "que", "com", "dos"):
+        assert stopword not in vocab
+    # Content terms survive (stopwords inside bigrams are also dropped first).
+    assert "mercado" in vocab
+
+
+def test_default_keeps_stopwords_in_vocabulary(synthetic_corpus, tmp_path):
+    """Default (remove_stopwords=False) leaves stopwords in the vocab (regression)."""
+    train, val, _ = build_train_val_test_split(synthetic_corpus, seed=42)
+    balanced = build_balanced_training_frame(train, seed=42)
+    config = TfidfTrainingConfig(classifier="logreg", max_features=500, min_df=1)
+    result = train_tfidf_classifier(balanced, val, run_dir=tmp_path, config=config)
+    vocab = load_tfidf_pipeline(result["model_dir"]).named_steps["tfidf"].vocabulary_
+    assert any(sw in vocab for sw in ("para", "que", "com", "dos"))
+
+
+def test_remove_stopwords_in_config_dicts():
+    assert TfidfTrainingConfig().to_dict()["remove_stopwords"] is False
+    assert TfidfTrainingConfig(remove_stopwords=True).to_dict()["remove_stopwords"] is True
+    assert TfidfMulticlassConfig(remove_stopwords=True).to_dict()["remove_stopwords"] is True
+
+
 def test_method_identifiers_correct():
     from economy_classifier.tfidf import METHOD_IDENTIFIERS
 

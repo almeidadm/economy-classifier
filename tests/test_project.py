@@ -13,6 +13,7 @@ from economy_classifier.project import (
     get_git_commit_short,
     persist_result_card,
     persist_run_artifacts,
+    prepare_run_dir,
     slugify,
 )
 
@@ -246,3 +247,87 @@ def test_compute_artifact_size_mb_directory(tmp_path):
     (tmp_path / "sub" / "b.bin").write_bytes(b"x" * 500_000)
     size = compute_artifact_size_mb(tmp_path)
     assert 1.4 < size < 1.6
+
+
+# --- prepare_run_dir ------------------------------------------------------
+
+
+def _seed_completed_run(runs_base, name, card_text="old"):
+    """Create runs_base/name with a result_card.json and a predictions.csv."""
+    run_dir = runs_base / name
+    run_dir.mkdir(parents=True)
+    (run_dir / "result_card.json").write_text(json.dumps({"model_id": card_text}))
+    (run_dir / "predictions.csv").write_text("index\n1\n")
+    return run_dir
+
+
+def test_prepare_run_dir_creates_fresh_dir(tmp_path):
+    runs_base = tmp_path / "runs"
+    run_dir = prepare_run_dir(runs_base, "tfidf_nb_binary_test_set")
+    assert run_dir == runs_base / "tfidf_nb_binary_test_set"
+    assert run_dir.is_dir()
+    assert not (tmp_path / "runs_archive").exists()
+
+
+def test_prepare_run_dir_reuses_incomplete_dir_in_place(tmp_path):
+    runs_base = tmp_path / "runs"
+    run_dir = runs_base / "tfidf_nb_binary_test_set"
+    run_dir.mkdir(parents=True)
+    (run_dir / "predictions_checkpoint.csv").write_text("partial")  # no result_card
+
+    returned = prepare_run_dir(runs_base, "tfidf_nb_binary_test_set")
+
+    assert returned == run_dir
+    assert (run_dir / "predictions_checkpoint.csv").exists()  # not touched
+    assert not (tmp_path / "runs_archive").exists()  # nothing worth archiving
+
+
+def test_prepare_run_dir_archive_moves_completed_run_outside_runs(tmp_path):
+    runs_base = tmp_path / "runs"
+    _seed_completed_run(runs_base, "tfidf_nb_binary_test_set", card_text="old")
+
+    run_dir = prepare_run_dir(runs_base, "tfidf_nb_binary_test_set")
+
+    # Stable path is fresh and empty.
+    assert run_dir == runs_base / "tfidf_nb_binary_test_set"
+    assert not (run_dir / "result_card.json").exists()
+
+    # The prior run survives under runs_archive (sibling of runs/, not inside it).
+    archive_root = tmp_path / "runs_archive"
+    archived = list(archive_root.iterdir())
+    assert len(archived) == 1
+    assert archived[0].name.startswith("tfidf_nb_binary_test_set__")
+    saved = json.loads((archived[0] / "result_card.json").read_text())
+    assert saved["model_id"] == "old"
+    # Archive lives outside runs/, so discovery globs never see it.
+    assert archive_root not in runs_base.parents
+    assert not list(runs_base.glob("**/runs_archive"))
+
+
+def test_prepare_run_dir_error_refuses_to_clobber(tmp_path):
+    runs_base = tmp_path / "runs"
+    _seed_completed_run(runs_base, "tfidf_nb_binary_test_set")
+
+    with pytest.raises(FileExistsError, match="already has a result_card"):
+        prepare_run_dir(runs_base, "tfidf_nb_binary_test_set", on_existing="error")
+
+    # Existing run untouched, no archive created.
+    assert (runs_base / "tfidf_nb_binary_test_set" / "result_card.json").exists()
+    assert not (tmp_path / "runs_archive").exists()
+
+
+def test_prepare_run_dir_overwrite_keeps_path_in_place(tmp_path):
+    runs_base = tmp_path / "runs"
+    _seed_completed_run(runs_base, "tfidf_nb_binary_test_set", card_text="old")
+
+    run_dir = prepare_run_dir(runs_base, "tfidf_nb_binary_test_set", on_existing="overwrite")
+
+    assert run_dir == runs_base / "tfidf_nb_binary_test_set"
+    # Old files remain until the caller overwrites them (no archive, no wipe).
+    assert json.loads((run_dir / "result_card.json").read_text())["model_id"] == "old"
+    assert not (tmp_path / "runs_archive").exists()
+
+
+def test_prepare_run_dir_rejects_unknown_policy(tmp_path):
+    with pytest.raises(ValueError, match="on_existing must be one of"):
+        prepare_run_dir(tmp_path / "runs", "x", on_existing="nope")

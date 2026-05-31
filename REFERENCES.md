@@ -446,11 +446,147 @@
 
 ---
 
+## 27. Calibracao de probabilidades (Brier score, ECE)
+
+> O projeto reporta Brier score e Expected Calibration Error (ECE) como metricas secundarias sempre que `y_score` for uma probabilidade calibrada (TF-IDF + `CalibratedClassifierCV`, BERT softmax). As referencias abaixo embasam a interpretacao e a obrigatoriedade de declarar `N/A` para LLM com `y_score` deterministico.
+
+- **Brier, G. W. (1950).** Verification of Forecasts Expressed in Terms of Probability. *Monthly Weather Review*, 78(1), 1–3. https://doi.org/10.1175/1520-0493(1950)078%3C0001:VOFEIT%3E2.0.CO;2
+  Definicao original do Brier score como erro quadratico medio entre probabilidades preditas e desfechos binarios — embasa `compute_brier_score` em `evaluation.py`.
+
+- **Guo, C., Pleiss, G., Sun, Y., & Weinberger, K. Q. (2017).** On Calibration of Modern Neural Networks. In *Proceedings of the 34th International Conference on Machine Learning (ICML 2017)*, vol. 70, pp. 1321–1330. arXiv:1706.04599. https://arxiv.org/abs/1706.04599
+  Define formalmente Expected Calibration Error (ECE) via binning e demonstra empiricamente que redes neurais profundas modernas (incluindo BERT-base) sao sistematicamente miscalibradas mesmo quando atingem alta acuracia — embasa `compute_ece` em `evaluation.py` e justifica reportar ECE alem de Brier para diagnosticar overconfidence dos BERTs.
+
+- **Naeini, M. P., Cooper, G. F., & Hauskrecht, M. (2015).** Obtaining Well Calibrated Probabilities Using Bayesian Binning. In *Proceedings of the 29th AAAI Conference on Artificial Intelligence*, pp. 2901–2907. https://ojs.aaai.org/index.php/AAAI/article/view/9602
+  Origem do conceito de binning equal-width que Guo et al. (2017) adotam para o ECE — referencia tecnica para a escolha de `n_bins` em `compute_ece`.
+
+- **DeGroot, M. H., & Fienberg, S. E. (1983).** The Comparison and Evaluation of Forecasters. *The Statistician*, 32(1/2), 12–22. https://doi.org/10.2307/2987588
+  Fundamento estatistico classico de reliability e refinement (decomposicao do Brier score) — referencia historica para o paradigma de calibracao.
+
+---
+
+## 28. Datasets out-of-distribution (OOD) para avaliacao fora de dominio
+
+> O notebook 45 (`45_ood_evaluation.ipynb`) avalia os 6 modelos in-domain (TF-IDF x 3 + BERT x 3) em 4 corpora externos: `Fake.Br`, `FakeRecogna`, `PortugueseNewsDataset` e `RecognaSumm`. Estes dois primeiros tem paper canonico (refs abaixo); os outros dois sao recursos publicos sem paper academico autonomo e devem ser citados via URL/Kaggle.
+
+- **Monteiro, R. A., Santos, R. L. S., Pardo, T. A. S., de Almeida, T. A., Ruiz, E. E. S., & Vale, O. A. (2018).** Contributions to the Study of Fake News in Portuguese: New Corpus and Automatic Detection Results. In *Computational Processing of the Portuguese Language (PROPOR 2018)*, *Lecture Notes in Computer Science*, vol. 11122, pp. 324–334. Springer. https://doi.org/10.1007/978-3-319-99722-3_33
+  Apresenta o corpus **Fake.Br** com 7.200 pares (true/fake) majoritariamente politicos em PT-BR — usado no notebook 45 como corpus OOD politico-geral. Embasa a Manchete D do `stil_strategy_note.md` (TF-IDF NB e o mais robusto fora de dominio politico).
+
+- **Garcia, G. L., Afonso, L. C. S., & Papa, J. P. (2022).** FakeRecogna: A New Brazilian Corpus for Fake News Detection. In *Computational Processing of the Portuguese Language (PROPOR 2022)*, *Lecture Notes in Computer Science*, vol. 13208, pp. 57–67. Springer. https://doi.org/10.1007/978-3-030-98305-5_6
+  Apresenta o corpus **FakeRecogna** multi-veiculo com 11.872 noticias rotuladas — usado no notebook 45, especialmente o recorte `economia UOL` (n=11.872) onde FinBERT-PT-BR recupera vantagem (F1 0,69). Evidencia aditiva da Manchete A: pretraining financeiro compensa apenas quando o downstream tambem e financeiro especializado.
+
+---
+
+## 29. Domain-specific BERT (paisagem internacional)
+
+> A secao 13 ja cobre o lineage FinBERT (Araci 2019, Yang 2020) e o eixo PT-BR (Santos 2023 FinBERT-PT-BR, Pires 2025 DeB3RTa). As referencias abaixo completam a paisagem internacional de domain-adaptation via further-pretraining em BERT — necessarias para enquadrar a Manchete A no estado da arte mais amplo: "quando pretraining de dominio compensa?".
+
+- **Lee, J., Yoon, W., Kim, S., Kim, D., Kim, S., So, C. H., & Kang, J. (2020).** BioBERT: a pre-trained biomedical language representation model for biomedical text mining. *Bioinformatics*, 36(4), 1234–1240. https://doi.org/10.1093/bioinformatics/btz682
+  Exemplar mais citado de domain-specific BERT (biomedico, PubMed + PMC). Estabelece o protocolo de "continued pretraining" sobre BERT-base que e a base metodologica do FinBERT (Araci 2019, Yang 2020) e do FinBERT-PT-BR (Santos 2023). Junto com SciBERT, ancora a discussao "quando pretraining de dominio compensa?".
+
+- **Beltagy, I., Lo, K., & Cohan, A. (2019).** SciBERT: A Pretrained Language Model for Scientific Text. In *Proceedings of EMNLP-IJCNLP 2019*, pp. 3615–3620. https://doi.org/10.18653/v1/D19-1371
+  SciBERT (Semantic Scholar corpus, biomedico + ciencia da computacao) — referencia complementar a BioBERT para o paradigma "from-scratch pretraining em dominio" (vs. continued pretraining). Util para a discussao da Manchete A: o DeB3RTa usa mixed-domain from-scratch, similar a SciBERT, mas com resultado pior em-dominio do que o BERTimbau geral (continued pretraining nao aconteceu).
+
+---
+
+## 30. Paisagem de LLMs PT-BR (complemento a secao 24)
+
+> A secao 24 cobre os LLMs efetivamente avaliados no projeto (Mistral, Qwen, Sabia) e o lineage Llama. As referencias abaixo completam a paisagem PT-BR/PT de modelos generativos abertos publicados em 2023–2025 — necessarias para enquadrar a Manchete C ("LLMs zero/few-shot perdem para BERT fine-tunado") em relacao ao estado da arte regional, e para responder a pergunta "por que nao avaliaram Sabia-2/Bode/Tucano?".
+
+- **Larcher, C. H. N., Piau, M., Finardi, P., Gengo, P., Esposito, P., & Caridade, V. (2023).** Cabrita: closing the gap for foreign languages. arXiv:2308.11878. https://arxiv.org/abs/2308.11878
+  Cabrita: continued pretraining de LLaMA-1 em ~3B tokens PT-BR. Marco historico — uma das primeiras adaptacoes LLaMA → PT publicada, contemporanea de Sabia (Pires 2023). Util para citar quando se discute a cronologia de LLMs PT-BR.
+
+- **Garcia, G. L., Paiola, P. H., Morelli, L. H., Candido, G., Candido Jr., A., Jodas, D. S., Afonso, L. C. S., Guilherme, I. R., Penteado, B. E., & Papa, J. P. (2024).** Introducing Bode: A Fine-Tuned Large Language Model for Portuguese Prompt-Based Task. arXiv:2401.02909. https://arxiv.org/abs/2401.02909
+  Bode: LLaMA-2 fine-tunado em Alpaca-PT, totalmente aberto. Comparavel direto a Sabia (proprietary) e Tucano (from-scratch). Notar que os mesmos autores publicaram FakeRecogna (secao 28) — autoria sobreposta indica grupo Unesp/Bauru consolidado em recursos PT-BR.
+
+- **Rodrigues, J., Gomes, L., Silva, J., Branco, A., Santos, R., Cardoso, H. L., & Osorio, T. (2023).** Advancing Neural Encoding of Portuguese with Transformer Albertina PT-*. In *Brazilian Conference on Intelligent Systems (BRACIS 2023)*, *Lecture Notes in Computer Science*, vol. 14195. Springer. https://doi.org/10.1007/978-3-031-49008-8_35 (arXiv:2305.06721)
+  Albertina PT-* (PT-PT e PT-BR): DeBERTa-base continued pretraining sobre brWaC. Encoder, nao decoder — concorrente direto de BERTimbau e referencia obrigatoria se a dissertacao discutir alternativas encoder PT-BR alem de BERTimbau.
+
+- **Santos, R., Silva, J., Gomes, L., Rodrigues, J., & Branco, A. (2024).** Advancing Generative AI for Portuguese with Open Decoder Gervasio PT*. arXiv:2402.18766. https://arxiv.org/abs/2402.18766
+  Gervasio PT-*: decoder aberto PT (PORTULAN/NOVA Lisboa). Complementa Albertina (encoder) com decoder; util para cobertura PT-PT no panorama luso-brasileiro alem de Sabia/Bode.
+
+- **Lopes, R., Magalhaes, J., & Semedo, D. (2024).** GlorIA — A Generative and Open Large Language Model for Portuguese. arXiv:2402.12969. https://arxiv.org/abs/2402.12969
+  GlorIA: LLM PT (NOVA School Lisboa), 1.3B parametros aberto. Foco em PT-PT mas relevante para o panorama luso-brasileiro.
+
+- **Correa, N. K., Sen, A., Falk, S., & Fatimah, S. (2025).** Tucano: Advancing Neural Text Generation for Portuguese. *Patterns* (Cell Press), 6(6), 101325. https://doi.org/10.1016/j.patter.2025.101325 (arXiv:2411.07854)
+  Tucano: LLM PT-BR pretreinado **from-scratch** (nao continued pretraining), publicado em venue indexado da Cell Press. Diferenciador metodologico relevante — Sabia/Bode/Cabrita usam continued pretraining, Tucano nao. Citar como evidencia recente de que o paradigma from-scratch tambem e viavel em PT-BR.
+
+**Justificativa metodologica para o paper STIL nao usar LLM PT-BR especifico:** o paper avalia Mistral-7B-Instruct-v0.3 e Qwen2.5-7B-Instruct, NAO Sabia/Bode/Tucano. Recomenda-se adicionar uma frase honesta na secao 4 do paper explicando: "Restringimos a avaliacao LLM aos modelos abertos multilinguais mais usados na pratica (Mistral-7B, Qwen2.5-7B); a comparacao com LLMs PT-BR especializados (Sabia-2, Bode, Tucano) fica como trabalho futuro pois exigiria infraestrutura de inferencia separada para modelos proprietarios (Sabia-2) e tratamento dedicado a adapter/LoRA-only models." Sem isso, o reviewer perguntara "por que nao Sabia?".
+
+---
+
+## 31. Analise qualitativa e quantitativa de erros (FN/FP) em classificacao
+
+> O notebook `44_error_analysis_cross_task.ipynb` realiza analise de erros com foco em `mercado` (falsos positivos e falsos negativos), inspecionando casos individuais e identificando padroes sistematicos (ex.: confusao `colunas` vs `mercado` na multiclasse). As referencias abaixo embasam o protocolo de error analysis adotado, organizadas em cinco subtopicos.
+
+### 31.1. Survey e fundamentos
+
+- **Belinkov, Y., & Glass, J. (2019).** Analysis Methods in Neural Language Processing: A Survey. *Transactions of the Association for Computational Linguistics*, 7, 49–72. https://doi.org/10.1162/tacl_a_00254 (arXiv:1812.08951)
+  Survey canonico que organiza os metodos de analise de modelos neurais em PLN em quatro eixos (analise por sondagem, visualizacao, exemplos adversariais, desafio de generalizacao) — referencia introdutoria obrigatoria para qualquer secao de "Error Analysis".
+
+### 31.2. Frameworks de testes comportamentais e taxonomia de erros
+
+- **Ribeiro, M. T., Wu, T., Guestrin, C., & Singh, S. (2020).** Beyond Accuracy: Behavioral Testing of NLP Models with CheckList. In *Proceedings of the 58th Annual Meeting of the ACL*, pp. 4902–4912. https://doi.org/10.18653/v1/2020.acl-main.442 (Best Paper Award ACL 2020)
+  CheckList: taxonomia de tres tipos de teste (MFT — Minimum Functionality, INV — Invariance, DIR — Directional) e capability matrix (vocabulario, negacao, NER, robustez a typos, etc.). Embasa diretamente o protocolo de organizar FN/FP por categoria linguistica (ex.: "FPs em artigos com vocabulario financeiro mas sem conteudo de mercado") em vez de listar erros sem estrutura.
+
+- **Wu, T., Ribeiro, M. T., Heer, J., & Weld, D. S. (2019).** Errudite: Scalable, Reproducible, and Testable Error Analysis. In *Proceedings of the 57th Annual Meeting of the ACL*, pp. 747–763. https://doi.org/10.18653/v1/P19-1073
+  Errudite: DSL e ferramenta para definir grupos de instancias (`group`), atribuir causas (`attribute`) e propor counterfactual rewrites — operacionaliza a transicao de "olhar exemplos individuais" para "validar hipoteses sobre subgrupos de erro". Diretamente aplicavel ao notebook 44 (FNs `mercado` por subdominio: macroeconomia, varejo, mercado financeiro, etc.).
+
+- **Goel, K., Rajani, N. F., Vig, J., Tan, S., Wu, J., Zheng, S., Xiong, C., Bansal, M., & Re, C. (2021).** Robustness Gym: Unifying the NLP Evaluation Landscape. In *Proceedings of NAACL-HLT 2021: System Demonstrations*, pp. 42–55. https://doi.org/10.18653/v1/2021.naacl-demos.6
+  Framework que unifica CheckList + slicing + adversariais + transformacoes em um pipeline unico de avaliacao com cards de robustez. Util como meta-referencia quando a secao de error analysis combina varias estrategias.
+
+### 31.3. Slicing automatico — descobrir subgrupos com erro alto
+
+- **Chung, Y., Kraska, T., Polyzotis, N., Tae, K. H., & Whang, S. E. (2019).** Slice Finder: Automated Data Slicing for Model Validation. In *Proceedings of the 35th IEEE International Conference on Data Engineering (ICDE 2019)*, pp. 33–44. https://doi.org/10.1109/ICDE.2019.00139
+  Slice Finder: algoritmo (lattice search + false discovery control) para encontrar automaticamente subgrupos com desempenho significativamente pior que o overall — substitui inspecao manual por busca sistematica. Aplicavel ao FolhaUOL via slices por ano, secao editorial vizinha, comprimento de artigo.
+
+- **Eyuboglu, S., Varma, M., Saab, K., Delbrouck, J.-B., Lee-Messer, C., Dunnmon, J., Zou, J., & Re, C. (2022).** Domino: Discovering Systematic Errors with Cross-Modal Embeddings. In *International Conference on Learning Representations (ICLR 2022)*. arXiv:2203.14960. https://arxiv.org/abs/2203.14960
+  Domino: encontra slices coerentes via mixture models sobre embeddings (sem precisar de metadata pre-existente) e os descreve em linguagem natural via CLIP. Util quando os FNs/FPs nao caem em categorias obvias (secao editorial, autor) e o pesquisador precisa descobrir os agrupamentos.
+
+### 31.4. Contrastes e categorizacao linguistica de erros
+
+- **Gardner, M., Artzi, Y., Basmov, V., Berant, J., Bogin, B., Chen, S., Dasigi, P., Dua, D., Elazar, Y., Gottumukkala, A., et al. (2020).** Evaluating Models' Local Decision Boundaries via Contrast Sets. In *Findings of EMNLP 2020*, pp. 1307–1323. https://doi.org/10.18653/v1/2020.findings-emnlp.117
+  Contrast Sets: protocolo de edicao minima manual de exemplos para flipar o gold label, isolando capacidades especificas. Para o projeto, util como inspiracao metodologica — em vez de avaliar so na distribuicao natural, construir um conjunto pequeno de contrastes mercado/colunas e mercado/outros para diagnostico fino.
+
+- **Naik, A., Ravichander, A., Sadeh, N., Rose, C., & Neubig, G. (2018).** Stress Test Evaluation for Natural Language Inference. In *Proceedings of the 27th International Conference on Computational Linguistics (COLING 2018)*, pp. 2340–2353. arXiv:1806.00692. https://arxiv.org/abs/1806.00692
+  Categoriza erros de NLI em seis classes (antonimia, negacao, sobreposicao lexical, falacia gramatical, comprimento, ruido) e mostra que cada uma expoe vulnerabilidades distintas. Modelo conceitual para categorizar FN/FP do `mercado` por mecanismo causal (vocabulario superficial, contexto editorial, comprimento do artigo, etc.).
+
+### 31.5. Vieses de anotacao como fonte sistematica de FN/FP
+
+- **Gururangan, S., Swayamdipta, S., Levy, O., Schwartz, R., Bowman, S., & Smith, N. A. (2018).** Annotation Artifacts in Natural Language Inference Data. In *Proceedings of NAACL-HLT 2018*, pp. 107–112. https://doi.org/10.18653/v1/n18-2017
+  Demonstra que artefatos de anotacao (pistas superficiais correlacionadas com o label) permitem que modelos atinjam alta acuracia sem entender a tarefa — e que esses mesmos artefatos explicam grande parte dos FN/FP residuais. Embasa a discussao no projeto sobre validade de construto da label `mercado` (secao editorial vs conteudo): a confusao mediada por modelo entre `colunas` e `mercado` pode ser interpretada como artefato da rotulagem editorial, nao deficiencia do modelo.
+
+### 31.6. Explicacao instance-level (inspecao qualitativa de FN/FP individuais)
+
+> Quando o notebook 44 mostra um caso especifico de FN/FP (`predictions.csv` filtrado), as ferramentas abaixo permitem responder "quais tokens/features mais contribuiram para essa predicao?" — convertendo intuicao em evidencia atribuivel.
+
+- **Ribeiro, M. T., Singh, S., & Guestrin, C. (2016).** "Why Should I Trust You?": Explaining the Predictions of Any Classifier. In *Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining*, pp. 1135–1144. https://doi.org/10.1145/2939672.2939778 (versao demo NAACL: https://doi.org/10.18653/v1/n16-3020)
+  LIME: explicacao local por perturbacao linear em torno de uma instancia. Aplicavel diretamente aos modelos TF-IDF do projeto (cada token vira uma feature interpretavel) para entender por que um artigo especifico foi FN ou FP.
+
+- **Ribeiro, M. T., Singh, S., & Guestrin, C. (2018).** Anchors: High-Precision Model-Agnostic Explanations. In *Proceedings of the 32nd AAAI Conference on Artificial Intelligence*, pp. 1527–1535. https://doi.org/10.1609/aaai.v32i1.11491
+  Anchors: extrai regras de decisao locais com precision garantida ("se contem 'bolsa' e nao contem 'opiniao' entao previsto `mercado` com 95% precision no entorno"). Complementa LIME ao oferecer explicacoes mais interpretaveis para texto.
+
+- **Lundberg, S. M., & Lee, S.-I. (2017).** A Unified Approach to Interpreting Model Predictions. In *Advances in Neural Information Processing Systems (NeurIPS)*, vol. 30, pp. 4765–4774. arXiv:1705.07874. https://arxiv.org/abs/1705.07874
+  SHAP: framework unificado de feature attribution baseado em valores de Shapley, com garantias teoricas de consistencia. Aplicavel a TF-IDF (KernelSHAP) e a BERT (DeepSHAP via captum/integrated gradients).
+
+- **Wallace, E., Tuyls, J., Wang, J., Subramanian, S., Gardner, M., & Singh, S. (2019).** AllenNLP Interpret: A Framework for Explaining Predictions of NLP Models. In *Proceedings of EMNLP-IJCNLP 2019: System Demonstrations*, pp. 7–12. https://doi.org/10.18653/v1/D19-3002
+  Framework que reune saliency maps (integrated gradients, smoothgrad), input reduction e adversarial attacks sob uma interface unica — referencia tecnica quando se reporta saliencia de tokens para BERTimbau/FinBERT-PT-BR em FN/FP especificos.
+
+### 31.7. Contrafactuais e triggers adversariais para diagnostico
+
+- **Wu, T., Ribeiro, M. T., Heer, J., & Weld, D. S. (2021).** Polyjuice: Generating Counterfactuals for Explaining, Evaluating, and Improving Models. In *Proceedings of the 59th Annual Meeting of the ACL*, pp. 6707–6723. https://doi.org/10.18653/v1/2021.acl-long.523
+  Polyjuice: gerador de contrafactuais controlados (negacao, troca de quantificador, troca de entidade) para identificar quais perturbacoes flipam predicoes. Aplicavel a `mercado` para verificar robustez: trocar "alta do dolar" por "queda do dolar" deveria preservar a label, trocar "Bolsa de Valores" por "Bolsa de Lisboa" deveria preservar tambem.
+
+- **Wallace, E., Feng, S., Kandpal, N., Gardner, M., & Singh, S. (2019).** Universal Adversarial Triggers for Attacking and Analyzing NLP. In *Proceedings of EMNLP-IJCNLP 2019*, pp. 2153–2162. https://doi.org/10.18653/v1/d19-1221
+  Demonstra triggers universais (sequencias curtas de tokens que, anexadas a qualquer entrada, forcam uma predicao alvo) como mecanismo de stress-test. Util como referencia para a discussao "quao fragil e o classificador a entradas adversariais?".
+
+---
+
 ## Notas finais
 
 1. **Citacoes a conferir antes da submissao da dissertacao:**
    - O DOI exato do paper FinBERT-PT-BR pode variar entre versoes SBC; usar o ID em https://sol.sbc.org.br/index.php/bwaif para a versao final.
    - O paper DeB3RTa (Pires et al. 2025) deve ser conferido na MDPI em https://www.mdpi.com/2504-2289/9/3/51 para autores e ano definitivos.
    - Caso o `sabia-4` venha a ser usado via API e nao haja technical report formal, citar como "Maritaca AI. Sabia-4 [API]. https://www.maritaca.ai".
+   - Tucano (Correa et al. 2025, Patterns): a versao arXiv e 2411.07854; a versao em Patterns/Cell tem DOI 10.1016/j.patter.2025.101325 — usar a versao Patterns como canonica por estar em venue indexado e peer-reviewed.
 
 2. **Referencias gerais recomendadas para a fundamentacao teorica:** *The Hundred-Page Machine Learning Book* (Burkov 2019) e *Deep Learning* (Goodfellow, Bengio & Courville 2016) caso a dissertacao tenha uma secao introdutoria de ML.

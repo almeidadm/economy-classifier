@@ -6,7 +6,7 @@ Esta avaliação **substitui parcialmente** a leitura de `Fake.Br` e `FakeRecogn
 
 ## Pré-requisitos
 
-- `colab_portuguese_news.zip` enviado para `<DRIVE>/economy-classifier/colab_portuguese_news.zip` (~11 MB). Gerar localmente com `uv run python scripts/colab_pack_portuguese_news.py`.
+- `colab_ood_data.zip` (zip unificado dos 4 corpora OOD) em `<DRIVE>/economy-classifier/`. Gerar com `uv run python scripts/colab_pack_ood_data.py` — inclui `portuguese_news_wikinotices/` junto com FB+FR+RS.
 - Os 6 modelos binários treinados em `<DRIVE>/economy-classifier/runs/<model_id>_binary_test_set/model/`, conforme convenção dos NBs 21 / 11–13:
   - `bert_bertimbau_binary_test_set/model/`
   - `bert_finbert_ptbr_binary_test_set/model/`
@@ -53,8 +53,8 @@ sys.path.insert(0, str(REPO_DIR / "scripts"))
 import zipfile
 
 DATA_ROOT = Path("/content/ood_data/portuguese_news_wikinotices")
-zip_path = DRIVE_BASE / "colab_portuguese_news.zip"
-assert zip_path.exists(), f"Falta {zip_path}. Rode scripts/colab_pack_portuguese_news.py local e faça upload."
+zip_path = DRIVE_BASE / "colab_ood_data.zip"
+assert zip_path.exists(), f"Falta {zip_path}. Rode scripts/colab_pack_ood_data.py local e faça upload."
 
 DATA_ROOT.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(zip_path) as zf:
@@ -62,6 +62,8 @@ with zipfile.ZipFile(zip_path) as zf:
 
 print(f"Extraído: {sorted(p.name for p in DATA_ROOT.iterdir())}")
 ```
+
+> Em uso normal você não precisa desse passo isolado — o notebook `45_ood_evaluation.ipynb` já extrai `colab_ood_data.zip` na seção 3 e disponibiliza os 4 corpora simultaneamente. Esta seção existe só para auditar PN isoladamente fora do notebook.
 
 ### 3. Rodar inferência sobre os 6 modelos
 

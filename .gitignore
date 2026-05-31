@@ -3,6 +3,10 @@
 # Splits/runs/folds geram-se via notebook 01 + scripts/colab_unpack.py.
 data/
 artifacts/
+# Excecao: stopwords PT-BR materializadas sao asset de runtime do pacote
+# (package-data em pyproject), nao saida de experimento — versionar.
+!src/economy_classifier/data/
+!src/economy_classifier/data/**
 
 # Python
 *.pyc

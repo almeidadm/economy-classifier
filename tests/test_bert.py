@@ -125,7 +125,7 @@ def _patch_training(monkeypatch):
 
 def test_bert_training_config_defaults():
     cfg = BertTrainingConfig()
-    assert cfg.max_length == 256
+    assert cfg.max_length == 500
     assert cfg.learning_rate == 2e-5
     assert cfg.gradient_accumulation_steps == 8
     assert cfg.num_train_epochs == 3
@@ -147,6 +147,44 @@ def test_bert_config_to_dict():
     assert "early_stopping_patience" in d
     assert "save_total_limit" in d
     assert d["per_device_eval_batch_size"] == 8
+
+
+def test_bert_config_remove_stopwords_default_and_dict():
+    assert BertTrainingConfig().remove_stopwords is False
+    assert BertTrainingConfig().to_dict()["remove_stopwords"] is False
+    assert BertTrainingConfig(remove_stopwords=True).to_dict()["remove_stopwords"] is True
+    multi = BertMulticlassConfig(label_set=("a", "b"), remove_stopwords=True)
+    assert multi.to_dict()["remove_stopwords"] is True
+
+
+class _CapturingTokenizer:
+    """Records the text strings handed to it before subword tokenization."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def __call__(self, texts, *, truncation, padding, max_length):
+        self.texts = list(texts)
+        n = len(self.texts)
+        return {"input_ids": [[0]] * n, "attention_mask": [[1]] * n}
+
+
+def test_tokenize_dataframe_strips_stopwords_before_tokenizing():
+    import pandas as pd
+
+    tok = _CapturingTokenizer()
+    df = pd.DataFrame({"text": ["o mercado de acoes subiu"], "label": [1]})
+    bert._tokenize_dataframe(df, tok, max_length=8, remove_stopwords=True)
+    assert tok.texts == ["mercado acoes subiu"]
+
+
+def test_tokenize_dataframe_keeps_raw_text_when_flag_off():
+    import pandas as pd
+
+    tok = _CapturingTokenizer()
+    df = pd.DataFrame({"text": ["o mercado de acoes subiu"], "label": [1]})
+    bert._tokenize_dataframe(df, tok, max_length=8)
+    assert tok.texts == ["o mercado de acoes subiu"]
 
 
 # ---------------------------------------------------------------------------

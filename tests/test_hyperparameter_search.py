@@ -158,6 +158,20 @@ def test_build_search_pipeline_invalid_classifier():
         _build_search_pipeline("xgboost")
 
 
+def test_build_search_pipeline_stopwords_off_by_default():
+    pipeline = _build_search_pipeline("logreg")
+    assert pipeline.named_steps["tfidf"].stop_words is None
+
+
+def test_build_search_pipeline_stopwords_on_matches_training_list():
+    """Search vectorizer must use the same PT-BR list as final training, so
+    best_params are ranked in the feature space the model is later fit on."""
+    from economy_classifier.text_processing import tfidf_stop_words
+
+    pipeline = _build_search_pipeline("logreg", remove_stopwords=True)
+    assert pipeline.named_steps["tfidf"].stop_words == tfidf_stop_words()
+
+
 # ---------------------------------------------------------------------------
 # Best-params translation
 # ---------------------------------------------------------------------------

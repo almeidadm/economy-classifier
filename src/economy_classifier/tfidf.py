@@ -18,6 +18,8 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 
+from .text_processing import tfidf_stop_words
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -47,6 +49,7 @@ class TfidfTrainingConfig:
     class_weight: str | None = None
     max_iter: int = 1000
     seed: int = 2026
+    remove_stopwords: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -62,6 +65,7 @@ class TfidfTrainingConfig:
             "class_weight": self.class_weight,
             "max_iter": self.max_iter,
             "seed": self.seed,
+            "remove_stopwords": self.remove_stopwords,
         }
 
 
@@ -74,6 +78,7 @@ def _build_pipeline(config: TfidfTrainingConfig) -> Pipeline:
         max_df=config.max_df,
         strip_accents="unicode",
         lowercase=True,
+        stop_words=tfidf_stop_words() if config.remove_stopwords else None,
     )
 
     if config.classifier == "linearsvc":
@@ -219,6 +224,7 @@ class TfidfMulticlassConfig(TfidfTrainingConfig):
             "class_weight": self.class_weight,
             "max_iter": self.max_iter,
             "seed": self.seed,
+            "remove_stopwords": self.remove_stopwords,
             "strategy": self.strategy,
         }
 
@@ -232,6 +238,7 @@ def _build_multiclass_pipeline(config: TfidfMulticlassConfig) -> Pipeline:
         max_df=config.max_df,
         strip_accents="unicode",
         lowercase=True,
+        stop_words=tfidf_stop_words() if config.remove_stopwords else None,
     )
 
     if config.classifier == "linearsvc":

@@ -73,6 +73,72 @@ def create_run_directory(stage: str, run_name: str | None = None) -> Path:
     return run_dir
 
 
+def prepare_run_dir(
+    runs_base: Path,
+    name: str,
+    *,
+    on_existing: str = "archive",
+) -> Path:
+    """Return ``runs_base/name``, guarding an already-completed run from loss.
+
+    The notebooks address runs by the stable name ``{model_id}_{task}_{regime}``
+    (see ``41_eda_resultados``, ``43_ensemble``, ``44_analise_qualitativa_erros``
+    and ``scripts/coverage_aligned_metrics``), so the path cannot be timestamped.
+    This guard keeps the stable name while preventing a re-run from silently
+    overwriting a prior result. A run counts as *completed* once it holds a
+    ``result_card.json``; an incomplete dir (e.g. a crashed run) is always reused
+    in place since there is nothing worth preserving.
+
+    ``on_existing`` decides what to do when a completed run already occupies the
+    target path:
+
+    - ``"archive"`` (default): move the existing run to a timestamped sibling
+      under ``runs_base.parent / "runs_archive"`` (``runs/`` is reserved for the
+      live, discoverable runs). The move is a cheap rename, but the fresh run
+      regenerates its own artifacts, so Drive ends up holding both copies until
+      ``runs_archive`` is pruned — relevant for BERT runs that carry model
+      weights. Discovery globs and ``colab_pack_results`` only scan ``runs/``, so
+      archives stay out of the comparison table and the results zip.
+    - ``"overwrite"``: reuse the path in place (existing files get overwritten).
+    - ``"error"``: raise :class:`FileExistsError` so the caller decides.
+    """
+    valid = {"archive", "overwrite", "error"}
+    if on_existing not in valid:
+        raise ValueError(
+            f"on_existing must be one of {sorted(valid)}, got {on_existing!r}"
+        )
+
+    run_dir = runs_base / name
+    card = run_dir / "result_card.json"
+
+    if card.exists():
+        if on_existing == "error":
+            try:
+                generated = json.loads(card.read_text()).get("generated_at")
+            except (OSError, json.JSONDecodeError):
+                generated = None
+            stamp = f" (generated {generated})" if generated else ""
+            raise FileExistsError(
+                f"run {name!r} already has a result_card.json{stamp}. "
+                "Set on_existing='archive' to keep a timestamped copy or "
+                "'overwrite' to replace it in place."
+            )
+        if on_existing == "archive":
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            archive_root = runs_base.parent / "runs_archive"
+            archive_root.mkdir(parents=True, exist_ok=True)
+            dest = archive_root / f"{name}__{timestamp}"
+            # Disambiguate a second re-run inside the same second.
+            collision = 1
+            while dest.exists():
+                dest = archive_root / f"{name}__{timestamp}_{collision}"
+                collision += 1
+            run_dir.rename(dest)
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def build_run_metadata(
     *,
     run_dir: Path,

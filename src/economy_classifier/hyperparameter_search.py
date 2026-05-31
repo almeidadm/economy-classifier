@@ -30,6 +30,8 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 
+from .text_processing import tfidf_stop_words
+
 if TYPE_CHECKING:
     import pandas as pd
 
@@ -155,12 +157,18 @@ def _build_search_pipeline(
     multiclass: bool = False,
     strategy: str = "native",
     seed: int = 2026,
+    remove_stopwords: bool = False,
 ) -> Pipeline:
     """Pipeline used during hyperparameter search.
 
     Never wraps LinearSVC in ``CalibratedClassifierCV`` — calibration is only
     needed to expose ``predict_proba`` at evaluation time, not to rank
     hyperparameters by F1.
+
+    ``remove_stopwords`` must mirror the final-training config so the search
+    optimizes ``min_df``/``max_df``/``max_features`` in the same feature space
+    the model is later trained on (otherwise best_params come from a different
+    vocabulary than the one used at fit time).
     """
     if classifier not in VALID_TFIDF_CLASSIFIERS:
         raise ValueError(
@@ -168,7 +176,11 @@ def _build_search_pipeline(
             f"got {classifier!r}"
         )
 
-    vectorizer = TfidfVectorizer(strip_accents="unicode", lowercase=True)
+    vectorizer = TfidfVectorizer(
+        strip_accents="unicode",
+        lowercase=True,
+        stop_words=tfidf_stop_words() if remove_stopwords else None,
+    )
 
     if classifier == "logreg":
         base = LogisticRegression(max_iter=1000, random_state=seed, solver="lbfgs")
@@ -195,6 +207,7 @@ def random_search_tfidf(
     n_jobs: int = 2,
     seed: int = 2026,
     search_space: dict | None = None,
+    remove_stopwords: bool = False,
     verbose: int = 1,
 ) -> SearchResult:
     """Run ``RandomizedSearchCV`` over a TF-IDF pipeline.
@@ -213,6 +226,11 @@ def random_search_tfidf(
     Returns a :class:`SearchResult` whose ``best_params`` keep the sklearn
     pipeline-prefixed keys; use :func:`tfidf_best_params_to_kwargs` to strip
     prefixes before instantiating ``TfidfTrainingConfig``.
+
+    ``remove_stopwords`` toggles PT-BR stopword removal in the search vectorizer
+    and **must match** the ``remove_stopwords`` of the ``TfidfTrainingConfig``
+    used for final training, so the search ranks hyperparameters in the same
+    feature space the model is fit on.
     """
     if scoring is None:
         scoring = "f1_macro" if multiclass else "f1"
@@ -223,6 +241,7 @@ def random_search_tfidf(
 
     pipeline = _build_search_pipeline(
         classifier, multiclass=multiclass, strategy=strategy, seed=seed,
+        remove_stopwords=remove_stopwords,
     )
     cv = StratifiedKFold(n_splits=cv_n_splits, shuffle=True, random_state=cv_seed)
 

@@ -9,7 +9,7 @@ Diferencial em relação aos outros 3 OODs:
 
 ## Pré-requisitos
 
-- `colab_recognasumm.zip` em `<DRIVE>/economy-classifier/colab_recognasumm.zip` (~33 MB). Gerar com `uv run python scripts/colab_pack_recognasumm.py`.
+- `colab_ood_data.zip` (zip unificado dos 4 corpora OOD) em `<DRIVE>/economy-classifier/`. Gerar com `uv run python scripts/colab_pack_ood_data.py` — inclui `recognasumm/test.jsonl` junto com FB+FR+PN.
 - 6 modelos binários treinados em `<DRIVE>/economy-classifier/runs/<model_id>_binary_test_set/model/` (mesmos do `colab_run_portuguese_news.md`).
 - Repositório clonado em `/content/economy-classifier/`.
 
@@ -48,8 +48,8 @@ sys.path.insert(0, str(REPO_DIR / "scripts"))
 import zipfile
 
 DATA_ROOT = Path("/content/ood_data/recognasumm")
-zip_path = DRIVE_BASE / "colab_recognasumm.zip"
-assert zip_path.exists(), f"Falta {zip_path}. Rode scripts/colab_pack_recognasumm.py local e faça upload."
+zip_path = DRIVE_BASE / "colab_ood_data.zip"
+assert zip_path.exists(), f"Falta {zip_path}. Rode scripts/colab_pack_ood_data.py local e faça upload."
 
 DATA_ROOT.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(zip_path) as zf:
@@ -57,6 +57,8 @@ with zipfile.ZipFile(zip_path) as zf:
 
 print(f"Extraído: {sorted(p.name for p in DATA_ROOT.iterdir())}")
 ```
+
+> Em uso normal você não precisa desse passo isolado — o notebook `45_ood_evaluation.ipynb` já extrai `colab_ood_data.zip` na seção 3 e disponibiliza os 4 corpora simultaneamente. Esta seção existe só para auditar RecognaSumm isoladamente fora do notebook.
 
 ### 3. Rodar inferência sobre os 6 modelos
 
