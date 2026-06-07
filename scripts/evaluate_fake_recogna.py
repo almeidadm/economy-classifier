@@ -80,7 +80,7 @@ DEFAULT_FAKE_RECOGNA_ROOT = Path(
 )
 DEFAULT_HARDWARE = "local-CPU"
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_MAX_LENGTH = 128
+DEFAULT_MAX_LENGTH = 500  # uniforme com o treino in-domain (NB 21); antes 128
 ECONOMIA_UOL_NETLOC = "economia.uol.com.br"
 POSITIVE_BINARY = 1
 

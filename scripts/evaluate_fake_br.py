@@ -27,8 +27,10 @@ Limitacoes declaradas (refletidas em ``notes``):
 - AUC-ROC e Brier/ECE sob domain shift nao sao apples-to-apples com os cards
   in-domain — interpretar como estimativa OOD, nao como nivel absoluto de
   calibracao.
-- Truncacao em ``max_length=128`` (config BERT do projeto) descarta a cauda
-  longa de muitos artigos do Fake.Br — manter para paridade com o treino.
+- Truncacao em ``max_length=500`` (igual ao treino in-domain do NB 21,
+  ``BERT_PARAMS``) — captura ~o artigo completo, <512 (limite de pos.
+  embeddings). Antes era 128, o que truncava a cauda e, apesar do comentario
+  legado, NAO correspondia ao treino (que sempre usou 500).
 
 Uso tipico (rodar uma vez por modelo, no Colab onde os pesos vivem):
 
@@ -79,7 +81,7 @@ DEFAULT_FAKE_BR_ROOT = Path(
 )
 DEFAULT_HARDWARE = "local-CPU"
 DEFAULT_BATCH_SIZE = 32
-DEFAULT_MAX_LENGTH = 128
+DEFAULT_MAX_LENGTH = 500  # uniforme com o treino in-domain (NB 21); antes 128
 POSITIVE_BINARY = 1
 
 # Mapping Fake.Br categories -> 7+other multiclass schema.

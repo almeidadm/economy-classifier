@@ -32,11 +32,14 @@ Estrutura final do zip casa exatamente com o que o notebook 45 espera:
       split_ids.csv
     recognasumm/
       test.jsonl
+      train.jsonl
+      validation.jsonl
 
 Pre-requisitos:
 - fn-dataset-eda clonado em ~/Documentos/repositorios/fn-dataset-eda/ (FB+FR).
 - ``data/portuguese_news_wikinotices/`` reconstruido (ver docs/colab_run_portuguese_news.md).
-- ``data/recognasumm/test.jsonl`` baixado de HF (ver docs/colab_run_recognasumm.md).
+- ``data/recognasumm/{test,train,validation}.jsonl`` baixados de HF (particao
+  ``full`` = 135.272 docs; ver docs/colab_run_recognasumm.md).
 """
 
 from __future__ import annotations
